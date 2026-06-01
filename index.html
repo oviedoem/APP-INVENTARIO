@@ -339,7 +339,7 @@
         <div class="mej-banner-icon">📊</div>
         <div>
           <h3 class="mej-banner-title">Diagnóstico 2025 → 2026 · El Manzano</h3>
-          <p class="mej-banner-sub">Basado en 9.163 productos · Inventario completo</p>
+          <p class="mej-banner-sub" id="mej-banner-sub">Basado en 9.163 productos · Inventario completo</p>
         </div>
       </div>
 
@@ -348,33 +348,33 @@
         <div class="mej-kpi-card mej-kpi-2025">
           <div class="mej-kpi-year">Inventario 2025</div>
           <div class="mej-kpi-grid">
-            <div class="mej-kpi-item"><span class="mej-kpi-val">84,0%</span><span class="mej-kpi-lbl">Items exactos</span></div>
-            <div class="mej-kpi-item"><span class="mej-kpi-val">95,43%</span><span class="mej-kpi-lbl">Exactitud unid.</span></div>
-            <div class="mej-kpi-item"><span class="mej-kpi-val mej-bad">$26,0M</span><span class="mej-kpi-lbl">Dispersión total</span></div>
-            <div class="mej-kpi-item"><span class="mej-kpi-val mej-bad">2,37%</span><span class="mej-kpi-lbl">% Dispersión</span></div>
-            <div class="mej-kpi-item"><span class="mej-kpi-val mej-bad">$16,8M</span><span class="mej-kpi-lbl">Faltante valor</span></div>
-            <div class="mej-kpi-item"><span class="mej-kpi-val">$9,2M</span><span class="mej-kpi-lbl">Exceso valor</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val" id="mej25-exactos">84,0%</span><span class="mej-kpi-lbl">Items exactos</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val" id="mej25-exactitud">95,43%</span><span class="mej-kpi-lbl">Exactitud unid.</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val mej-bad" id="mej25-disp">$26,0M</span><span class="mej-kpi-lbl">Dispersión total</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val mej-bad" id="mej25-pctdisp">2,37%</span><span class="mej-kpi-lbl">% Dispersión</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val mej-bad" id="mej25-faltante">$16,8M</span><span class="mej-kpi-lbl">Faltante valor</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val" id="mej25-exceso">$9,2M</span><span class="mej-kpi-lbl">Exceso valor</span></div>
           </div>
         </div>
         <div class="mej-kpi-arrow">→</div>
         <div class="mej-kpi-card mej-kpi-2026">
           <div class="mej-kpi-year">Inventario 2026 <span class="badge-wip">En curso</span></div>
           <div class="mej-kpi-grid">
-            <div class="mej-kpi-item"><span class="mej-kpi-val mej-bad">83,2%</span><span class="mej-kpi-lbl">Items exactos ▼</span></div>
-            <div class="mej-kpi-item"><span class="mej-kpi-val mej-bad">94,56%</span><span class="mej-kpi-lbl">Exactitud unid. ▼</span></div>
-            <div class="mej-kpi-item"><span class="mej-kpi-val mej-critical">$48,5M</span><span class="mej-kpi-lbl">Dispersión total ▲</span></div>
-            <div class="mej-kpi-item"><span class="mej-kpi-val mej-critical">4,41%</span><span class="mej-kpi-lbl">% Dispersión ▲</span></div>
-            <div class="mej-kpi-item"><span class="mej-kpi-val mej-critical">$29,6M</span><span class="mej-kpi-lbl">Faltante valor ▲</span></div>
-            <div class="mej-kpi-item"><span class="mej-kpi-val mej-bad">$18,9M</span><span class="mej-kpi-lbl">Exceso valor ▲</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val" id="mej26-exactos">83,2%</span><span class="mej-kpi-lbl">Items exactos</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val" id="mej26-exactitud">94,56%</span><span class="mej-kpi-lbl">Exactitud unid.</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val" id="mej26-disp">$48,5M</span><span class="mej-kpi-lbl">Dispersión total</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val" id="mej26-pctdisp">4,41%</span><span class="mej-kpi-lbl">% Dispersión</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val" id="mej26-faltante">$29,6M</span><span class="mej-kpi-lbl">Faltante valor</span></div>
+            <div class="mej-kpi-item"><span class="mej-kpi-val" id="mej26-exceso">$18,9M</span><span class="mej-kpi-lbl">Exceso valor</span></div>
           </div>
         </div>
       </div>
 
       <!-- Alerta principal -->
       <div class="mej-alert mej-alert-critical">
-        <strong>⚠️ Situación crítica:</strong> La dispersión monetaria <strong>casi se duplicó</strong> de 2025 a 2026 ($26M → $48,5M).
+        <strong>⚠️ Situación:</strong> <span id="mej-alert-text">La dispersión monetaria <strong>casi se duplicó</strong> de 2025 a 2026 ($26M → $48,5M).
         De 1.463 productos con diferencia en 2025, <strong>1.456 siguen con diferencia en 2026</strong>. Solo 7 productos mejoraron completamente.
-        El inventario no está mejorando — se necesita acción estructural.
+        El inventario no está mejorando — se necesita acción estructural.</span>
       </div>
 
       <!-- ── ÁREAS CRÍTICAS ── -->
@@ -744,10 +744,10 @@
       <div class="mej-meta-card">
         <h3 class="mej-meta-title">🎯 Meta propuesta para cierre inventario 2026</h3>
         <div class="mej-meta-kpis">
-          <div class="mej-meta-kpi"><span class="mej-meta-val">≥ 87%</span><span class="mej-meta-lbl">Items exactos</span><span class="mej-meta-now">Hoy: 83,2%</span></div>
-          <div class="mej-meta-kpi"><span class="mej-meta-val">≥ 96%</span><span class="mej-meta-lbl">Exactitud unid.</span><span class="mej-meta-now">Hoy: 94,56%</span></div>
-          <div class="mej-meta-kpi"><span class="mej-meta-val">≤ $28M</span><span class="mej-meta-lbl">Dispersión total</span><span class="mej-meta-now">Hoy: $48,5M</span></div>
-          <div class="mej-meta-kpi"><span class="mej-meta-val">≤ 2,5%</span><span class="mej-meta-lbl">% Dispersión</span><span class="mej-meta-now">Hoy: 4,41%</span></div>
+          <div class="mej-meta-kpi"><span class="mej-meta-val">≥ 87%</span><span class="mej-meta-lbl">Items exactos</span><span class="mej-meta-now" id="mej-meta-exactos-hoy">Hoy: 83,2%</span></div>
+          <div class="mej-meta-kpi"><span class="mej-meta-val">≥ 96%</span><span class="mej-meta-lbl">Exactitud unid.</span><span class="mej-meta-now" id="mej-meta-exactitud-hoy">Hoy: 94,56%</span></div>
+          <div class="mej-meta-kpi"><span class="mej-meta-val">≤ $28M</span><span class="mej-meta-lbl">Dispersión total</span><span class="mej-meta-now" id="mej-meta-disp-hoy">Hoy: $48,5M</span></div>
+          <div class="mej-meta-kpi"><span class="mej-meta-val">≤ 2,5%</span><span class="mej-meta-lbl">% Dispersión</span><span class="mej-meta-now" id="mej-meta-pctdisp-hoy">Hoy: 4,41%</span></div>
         </div>
         <p class="mej-meta-sub">Las metas propuestas son alcanzables con depuración de catálogo + mejoras de protocolo, sin necesidad de inversión tecnológica.</p>
       </div>

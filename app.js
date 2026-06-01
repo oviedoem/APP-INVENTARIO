@@ -4431,6 +4431,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       switchToMode('mejoras');
       document.getElementById('welcome-screen').style.display = 'none';
+      renderMejoras();
     };
   });
 
@@ -4667,6 +4668,101 @@ document.addEventListener('DOMContentLoaded',()=>{
     document.addEventListener('change',e=>{ if(e.target.id===id) renderRecount();});
   });
 });
+
+/* ═══════════════════════════════════════════════════════════════
+   MEJORAS 2026 — KPIs dinámicos
+   ═══════════════════════════════════════════════════════════════ */
+function renderMejoras() {
+  const d25 = state.data2025 || [];
+  const d26 = state.data2026 || [];
+
+  function set(id, html) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  }
+  function fmtM(v) {
+    if (!v && v !== 0) return '—';
+    return '$' + (v / 1e6).toFixed(1) + 'M';
+  }
+  function fmtPct(v) {
+    if (v == null) return '—';
+    return v.toFixed(2).replace('.', ',') + '%';
+  }
+  function calcExactitudUnid(data) {
+    let sumSis = 0, sumAbsDif = 0;
+    for (const r of data) {
+      sumSis    += Math.abs(r.unidades_sistema || 0);
+      sumAbsDif += Math.abs(r.dif_unidades    || 0);
+    }
+    return sumSis ? (1 - sumAbsDif / sumSis) * 100 : 0;
+  }
+
+  // Banner total productos
+  const totalProds = Math.max(d25.length, d26.length);
+  const bannerSub = document.getElementById('mej-banner-sub');
+  if (bannerSub && totalProds) {
+    const estado = (d25.length && d26.length) ? 'Ambos inventarios cargados'
+                 : d25.length                 ? 'Solo 2025 cargado'
+                 :                              'Solo 2026 cargado';
+    bannerSub.textContent = 'Basado en ' + totalProds.toLocaleString('es-CL') + ' productos · ' + estado;
+  }
+
+  // Actualiza una tarjeta KPI completa
+  function updateCard(data, p) {
+    if (!data.length) return;
+    const cnt = calcCountSummary(data);
+    const mon = calcMonetarySummary(data);
+    const exU = calcExactitudUnid(data);
+    const hasMon = mon.totalSistema > 0;
+    set(p + '-exactos',   fmtPct(cnt.pctCorr));
+    set(p + '-exactitud', fmtPct(exU));
+    set(p + '-disp',      hasMon ? fmtM(mon.dispersion)          : '—');
+    set(p + '-pctdisp',   hasMon ? fmtPct(mon.pctDispersion)     : '—');
+    set(p + '-faltante',  hasMon ? fmtM(Math.abs(mon.difNeg))    : '—');
+    set(p + '-exceso',    hasMon ? fmtM(mon.difPos)              : '—');
+  }
+  updateCard(d25, 'mej25');
+  updateCard(d26, 'mej26');
+
+  // Alerta principal comparativa (solo si ambos años están cargados)
+  if (d25.length && d26.length) {
+    const mon25 = calcMonetarySummary(d25);
+    const mon26 = calcMonetarySummary(d26);
+    const conDif25 = d25.filter(r => (r.dif_unidades || 0) !== 0).length;
+    const keys26dif = new Set(
+      d26.filter(r => (r.dif_unidades || 0) !== 0)
+         .map(r => r.compositeKey || r.producto || '')
+         .filter(Boolean)
+    );
+    const persisten = d25.filter(r =>
+      (r.dif_unidades || 0) !== 0 &&
+      keys26dif.has(r.compositeKey || r.producto || '')
+    ).length;
+    const mejoraron = conDif25 - persisten;
+    const hasMon = mon25.totalSistema > 0 && mon26.totalSistema > 0;
+    set('mej-alert-text',
+      (hasMon
+        ? 'La dispersión monetaria cambió de <strong>' + fmtM(mon25.dispersion) +
+          '</strong> → <strong>' + fmtM(mon26.dispersion) + '</strong>. '
+        : '') +
+      'De <strong>' + conDif25.toLocaleString('es-CL') + '</strong> productos con diferencia en 2025, ' +
+      '<strong>' + persisten.toLocaleString('es-CL') + '</strong> siguen con diferencia en 2026. ' +
+      '<strong>' + mejoraron.toLocaleString('es-CL') + '</strong> productos mejoraron completamente.'
+    );
+  }
+
+  // Meta 2026 — "Hoy: X"
+  if (d26.length) {
+    const cnt26 = calcCountSummary(d26);
+    const mon26 = calcMonetarySummary(d26);
+    const exU26 = calcExactitudUnid(d26);
+    const hasMon = mon26.totalSistema > 0;
+    set('mej-meta-exactos-hoy',   'Hoy: ' + fmtPct(cnt26.pctCorr));
+    set('mej-meta-exactitud-hoy', 'Hoy: ' + fmtPct(exU26));
+    set('mej-meta-disp-hoy',      'Hoy: ' + (hasMon ? fmtM(mon26.dispersion)      : '—'));
+    set('mej-meta-pctdisp-hoy',   'Hoy: ' + (hasMon ? fmtPct(mon26.pctDispersion) : '—'));
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════════
    ACORDEONES (mejoras view)
