@@ -1,0 +1,33 @@
+# Datos / Excel — NUNCA al repo
+datos SOLO EJEMPLOS/
+*.xlsm
+*.xlsx
+*.xls
+*.csv
+*.pdf
+
+# Credenciales
+*.ini
+*.env
+credenciales*
+serviceAccountKey*.json
+users_export*.json
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Backups / históricos
+backups/
+_backup/
+_ARCHIVO/
+_HISTORICO/
+_PROMPTS/
+
+# Bats locales (no se publican)
+*.bat
+
+# IDE / Claude
+.claude/
+.vscode/
+.idea/
