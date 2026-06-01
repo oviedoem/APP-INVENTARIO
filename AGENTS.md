@@ -42,6 +42,25 @@ Antes de tocar una función, anotar explícitamente qué ya FUNCIONA y NO debe c
 
 ---
 
+## REGLA DE CIERRE DE SESIÓN — PUSH PENDIENTE
+
+Antes de terminar cualquier sesión donde se hayan modificado archivos en `D:\APP-INVENTARIO\`, Claude DEBE:
+
+1. Ejecutar `git status` en `D:\APP-INVENTARIO\`
+2. Si hay archivos modificados o sin commitear → hacer `git add -A && git commit && git push`
+3. Verificar que GitHub Pages se republica (el workflow se dispara automáticamente en cada push)
+4. Nunca dejar `app.js`, `index.html`, `style.css` o `planos_generated.js` modificados sin publicar
+
+Patrón de riesgo: se edita el código, se prueba localmente, la sesión termina con otras tareas → el push final se olvida y GitHub Pages queda desactualizado.
+
+Comando rápido:
+```
+cd D:\APP-INVENTARIO && git add -A && git status
+```
+Si hay cambios → commitear con mensaje descriptivo y hacer push.
+
+---
+
 ## PROYECTO INDEPENDIENTE — REGLA ABSOLUTA
 
 ```
