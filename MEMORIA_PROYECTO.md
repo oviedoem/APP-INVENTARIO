@@ -313,6 +313,17 @@ exportRecountExcel()               // V4.1: Excel 2 hojas: Reconteo + Ranking_$
 
 ## HISTORIAL DE CAMBIOS
 
+### V7.13 — 2026-06-01 — Migración a repo propio + GitHub Pages + fix persistencia
+
+- Working source: `D:\ferreteria-oviedo\APP-INVENTARIO\` → `D:\APP-INVENTARIO\`
+- Repo: `github.com/oviedoem/ferreteria-oviedo` (subcarpeta) → `github.com/oviedoem/APP-INVENTARIO` (raíz, público)
+- GitHub Pages habilitado (GitHub Actions): `https://oviedoem.github.io/APP-INVENTARIO/`
+- Bat de sync reescrito: git add/commit/push directo desde `D:\APP-INVENTARIO\`, sin mirror robocopy
+- `app.js`: DOMContentLoaded init ya no borra IDB+LS; ahora llama `restoreSession()` y muestra banner `#session-restore-banner`
+- PAT GitHub viejo (revocado) saneado del remote `D:\git-sync\.git\config`
+
+---
+
 ### V7.12 — 2026-05-30
 
 **Feature — REGISTROS 2026: consultas acumuladas + export del visible**

@@ -45,9 +45,20 @@ Antes de tocar una función, anotar explícitamente qué ya FUNCIONA y NO debe c
 ## PROYECTO INDEPENDIENTE — REGLA ABSOLUTA
 
 ```
-TRABAJAR SOLO EN:   D:\ferreteria-oviedo\APP-INVENTARIO\
-NUNCA TOCAR:        panel-admin.html · panel-cliente.html · panel-vendedor.html
-                    Cualquier archivo fuera de D:\ferreteria-oviedo\APP-INVENTARIO\
+TRABAJAR SOLO EN:   D:\APP-INVENTARIO\
+NUNCA TOCAR:        Cualquier archivo fuera de D:\APP-INVENTARIO\
+                    En particular D:\ferreteria-oviedo\ es OTRO proyecto (panel-admin,
+                    panel-cliente, panel-vendedor, pipeline ERP). No mezclar.
+
+REPO GITHUB:        https://github.com/oviedoem/APP-INVENTARIO  (público)
+DEPLOY ONLINE:      https://oviedoem.github.io/APP-INVENTARIO/  (GitHub Pages, auto en cada push)
+
+PERSISTENCIA (FIX V7.13):
+  El init en DOMContentLoaded LLAMA a restoreSession() (no la anula como antes).
+  Si hay datos guardados → banner #session-restore-banner los restaura.
+  Si no → app arranca limpia y muestra welcome.
+  Para forzar limpieza: botón 🧹 Limpiar del header (clearAllApp) o "Empezar de cero" en el banner.
+  IndexedDB y localStorage son por dispositivo — NO hay sync entre PC y celular.
 ```
 
 Este proyecto NO forma parte del panel admin/cliente/vendedor de Ferretería Oviedo.
@@ -59,7 +70,7 @@ no leer archivos fuera de esta carpeta.
 ## ARCHIVOS DEL PROYECTO
 
 ```
-D:\ferreteria-oviedo\APP-INVENTARIO\
+D:\APP-INVENTARIO\
   index.html            — estructura HTML + vistas
   style.css             — estilos (CSS variables + componentes)
   app.js                — lógica completa (state, parseo, render, filtros)
@@ -125,7 +136,7 @@ Antes de terminar cualquier sesión con cambios:
 
 2. Ejecutar sync a GitHub:
    ```
-   D:\ferreteria-oviedo\APP-INVENTARIO\ACTUALIZAR_GITHUB_APP_INVENTARIO.bat
+   D:\APP-INVENTARIO\ACTUALIZAR_GITHUB_APP_INVENTARIO.bat
    ```
 
 3. Confirmar que el commit fue exitoso (aparece hash y "subido a GitHub").
@@ -139,7 +150,7 @@ Antes de terminar cualquier sesión con cambios:
 - HTML + CSS + **Vanilla JS** — sin frameworks, sin npm, sin build step
 - Las librerías se cargan desde CDN en `index.html` (no agregar nuevas sin pedirlo)
 - No agregar dependencias externas
-- No crear archivos fuera de `D:\ferreteria-oviedo\APP-INVENTARIO\`
+- No crear archivos fuera de `D:\APP-INVENTARIO\`
 
 ### CDN activos
 ```
