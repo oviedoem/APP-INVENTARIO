@@ -824,8 +824,17 @@
           <button class="btn btn-sm" onclick="generateReporteFinal()">📑 Reporte Final</button>
           <button class="btn btn-sm btn-ghost" onclick="printMode('final')">🖨 Imprimir / PDF</button>
           <button class="btn btn-sm btn-email" onclick="emailReport('final')">✉ Email</button>
+          <button class="btn btn-sm filter-drawer-btn" onclick="openFilterPanel('final')">⚙ Filtros<span class="filter-badge" id="filter-badge-final"></span></button>
         </div>
       </div>
+      <div class="filter-drawer" id="filter-drawer-final">
+        <div class="filter-drawer-header">
+          <span class="filter-drawer-title">⚙ Filtros — Análisis Final</span>
+          <button class="filter-drawer-close" onclick="closeFilterPanel('final')">✕</button>
+        </div>
+        <div class="filters-bar" id="filters-final"></div>
+      </div>
+      <div class="filter-drawer-overlay" id="filter-overlay-final" onclick="closeFilterPanel('final')"></div>
 
       <!-- Cuadro resumen RESULTADOS -->
       <div id="inv-coverage-banner-final"></div>
@@ -970,6 +979,6 @@
 <!-- ── TOAST ─────────────────────────────────────────────────────── -->
 <div id="toast" class="toast hidden"></div>
 
-<script src="app.js?v=7.19"></script>
+<script src="app.js?v=7.20"></script>
 </body>
 </html>

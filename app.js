@@ -15,11 +15,12 @@ const state = {
   sortState: {},
   pendingLoad: null,
   filters: {
-    '2025':      { marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'', bodega:'' },
-    '2026':      { marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'', bodega:'' },
-    comparative: { marca:'', familia:'', perfamilia:'', zona:'', area:'' }
+    '2025':      { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'', patente:'', bodega:'' },
+    '2026':      { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'', patente:'', bodega:'' },
+    comparative: { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'' },
+    final:       { marca:'', familia:'', perfamilia:'', subfamilia:'' }
   },
-  searchText: { '2025': '', '2026': '', comparative: '' },
+  searchText: { '2025': '', '2026': '', comparative: '', final: '' },
   chartMode:  { '2025': 'unidades', '2026': 'unidades' },
   // Embudo jerárquico (nuevo V2)
   drilldown: {
@@ -1255,11 +1256,15 @@ function getFilteredData(year) {
     if (dd.hiperfamilia && r.perfamilia !== dd.hiperfamilia) return false;
     if (dd.familia      && r.familia    !== dd.familia)      return false;
     if (dd.marca        && r.marca      !== dd.marca)        return false;
-    // Filtros del drawer (solo ubicación)
-    if (f.bodega  && r.bodega  !== f.bodega)  return false;
-    if (f.zona    && r.zona    !== f.zona)    return false;
-    if (f.area    && r.area    !== f.area)    return false;
-    if (f.patente && r.patente !== f.patente) return false;
+    // Filtros del drawer
+    if (f.marca      && r.marca      !== f.marca)      return false;
+    if (f.familia    && r.familia    !== f.familia)    return false;
+    if (f.perfamilia && r.perfamilia !== f.perfamilia) return false;
+    if (f.subfamilia && r.subfamilia !== f.subfamilia) return false;
+    if (f.bodega     && r.bodega     !== f.bodega)     return false;
+    if (f.zona       && r.zona       !== f.zona)       return false;
+    if (f.area       && r.area       !== f.area)       return false;
+    if (f.patente    && r.patente    !== f.patente)    return false;
     if (q) {
       const hayProd = (r.producto || '').toLowerCase().includes(q);
       const hayCod  = (r.codigo   || '').toLowerCase().includes(q);
@@ -1277,7 +1282,7 @@ function setSearch(year, text) {
 }
 
 function clearFilters(mode) {
-  state.filters[mode] = { bodega:'', marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'' };
+  state.filters[mode] = { bodega:'', marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'', patente:'' };
   state.searchText[mode] = '';
   const inp = document.getElementById(`search-${mode}`);
   if (inp) inp.value = '';
@@ -1304,10 +1309,24 @@ function getFilteredDataComp() {
     (!f.marca      || r.marca      === f.marca)      &&
     (!f.familia    || r.familia    === f.familia)    &&
     (!f.perfamilia || r.perfamilia === f.perfamilia) &&
+    (!f.subfamilia || r.subfamilia === f.subfamilia) &&
     (!f.zona       || r.zona       === f.zona)       &&
     (!f.area       || r.area       === f.area)       &&
     (!q || (r.producto||'').toLowerCase().includes(q) || (r.codigo||'').toLowerCase().includes(q));
   return { d25: state.data2025.filter(fn), d26: state.data2026.filter(fn) };
+}
+
+function getFilteredDataFinal() {
+  const src = state.data2026?.length ? state.data2026 : state.data2025;
+  const f   = state.filters.final;
+  const q   = (state.searchText.final || '').toLowerCase().trim();
+  return src.filter(r =>
+    (!f.marca      || r.marca      === f.marca)      &&
+    (!f.familia    || r.familia    === f.familia)    &&
+    (!f.perfamilia || r.perfamilia === f.perfamilia) &&
+    (!f.subfamilia || r.subfamilia === f.subfamilia) &&
+    (!q || (r.producto||'').toLowerCase().includes(q) || (r.codigo||'').toLowerCase().includes(q))
+  );
 }
 
 // ── KPIs ───────────────────────────────────────────────────────
@@ -1724,16 +1743,17 @@ function renderMonetaryKPIs(year, data) {
 function renderFilters(mode) {
   const data = mode === 'comparative'
     ? [...state.data2025, ...state.data2026]
+    : mode === 'final'
+    ? (state.data2026?.length ? state.data2026 : state.data2025)
     : (mode === '2025' ? state.data2025 : state.data2026);
 
   const uniq = field => [...new Set(data.map(r => r[field]).filter(Boolean))].sort();
-  const f    = state.filters[mode];
+  const f    = state.filters[mode] || {};
   const q    = state.searchText[mode] || '';
 
-  // Modos year: solo filtros de ubicación (embudo maneja la jerarquía)
-  const groups = mode === 'comparative'
-    ? [['perfamilia','Hiperfamilia'],['marca','Marca'],['familia','Familia'],['zona','Zona'],['area','Área']]
-    : [['zona','Zona'],['area','Área'],['patente','Patente'],['bodega','Bodega EM']];
+  const groups = (mode === 'comparative' || mode === 'final')
+    ? [['perfamilia','Hiperfamilia'],['marca','Marca'],['familia','Familia'],['subfamilia','Subfamilia']]
+    : [['perfamilia','Hiperfamilia'],['marca','Marca'],['familia','Familia'],['subfamilia','Subfamilia'],['zona','Zona'],['area','Área'],['patente','Patente'],['bodega','Bodega EM']];
 
   const anyActive = groups.some(([field]) => f[field]) || q;
 
@@ -4683,9 +4703,10 @@ function renderV2Especiales(data) {
    ANÁLISIS FINAL — informe para el dueño
    ═══════════════════════════════════════════════════════════════ */
 function renderAnalisisFinal() {
-  const data = (state.data2026?.length ? state.data2026 : state.data2025) || [];
   const year = state.data2026?.length ? '2026' : '2025';
+  const data = getFilteredDataFinal();
   const emptyEl = document.getElementById('final-empty');
+  renderFilters('final');
 
   if (!data.length) {
     if (emptyEl) emptyEl.style.display = '';
@@ -4791,7 +4812,7 @@ function renderAnalisisFinal() {
   const faltantes = [...data].filter(r=>r.dif_unidades<0 || r.dif_peso<0)
     .sort((a,b)=>(a.dif_peso||0)-(b.dif_peso||0));
   buildTable('final-faltantes-tbl',
-    ['Codigo_tecnico','Descripcion','CONTEO','STOCK SISTEMA','DIFERENCIA','DIFERENCIA $','FAMILIA','MARCA'],
+    ['CODIGO_TECNICO','DESCRIPCION','CONTEO','STOCK SISTEMA','DIFERENCIA','DIFERENCIA $','FAMILIA','HIPERFAMILIA','MARCA'],
     faltantes.slice(0,200).map(r=>[
       r.codigo||'', trunc(r.producto||'',40),
       cNum(r.unidades_real), cNum(r.unidades_sistema),
@@ -4875,7 +4896,7 @@ function _renderFinalBarras(canvasId, data) {
 }
 
 function exportFinalExcel() {
-  const data = (state.data2026?.length ? state.data2026 : state.data2025) || [];
+  const data = getFilteredDataFinal();
   const year = state.data2026?.length ? '2026' : '2025';
   if (!data.length) { showToast('Sin datos para exportar.', 'error'); return; }
 
@@ -5000,6 +5021,7 @@ document.addEventListener('DOMContentLoaded', () => {
       switchToMode('final');
       document.getElementById('welcome-screen').style.display = 'none';
       renderAnalisisFinal();
+      updateFilterBadge('final');
     };
   });
 });
