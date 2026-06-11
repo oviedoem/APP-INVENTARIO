@@ -313,6 +313,31 @@ exportRecountExcel()               // V4.1: Excel 2 hojas: Reconteo + Ranking_$
 
 ## HISTORIAL DE CAMBIOS
 
+### V7.16 — 2026-06-11 — Fix consistencia Resumen RESULTADOS con informe oficial
+
+**TOCO: `app.js` (4 funciones) + `ANALISIS_EL MANZANO-V2026.xlsx` (TABLA_ANALISIS)**
+
+**Cambios app.js:**
+- `renderAnalisisFinal`: clasificación sobrantes/faltantes cambiada a `dif_peso` (sign $) — antes usaba `dif_unidades` → 1 producto en categoría incorrecta
+- `applyRowMapping`: `dif_valor_excel` (DIFERENCIA $) tiene prioridad sobre costo×unidades para `dif_peso`
+- `applyRowMapping`: `costo` prioriza catálogo (_costo) sobre columna Excel; `peso_sistema`/`peso_real` computados desde `unidades × costo` si columna ausente
+- `buildCatalogFromBodegas`: agrega hoja EXH (antes solo PEM+SEM)
+- `renderAnalisisFinal`: porcentajes redondeados a entero (`Math.round`) — igual al informe correo
+- Resumen compacto restaurado (`max-width:680px`), `font-weight:700` en filas clave
+
+**Cambios Excel:**
+- `TABLA_ANALISIS` reemplazada con datos del FINAL 8 junio (7 cols, incluye `DIFERENCIA $` oficial)
+- Todas las hojas de catálogo conservadas: SALA, PATIO, EXHIBICION, SEM, PEM, EXH, PROCESOS, BUSQUEDA
+
+**Resultado final (idéntico al correo):**
+- Total Sistema: $625.931.358 | Total Conteo: $623.851.200
+- Dif (+): $3.770.079 | 366 prods | 1% — Dif (-): $5.850.237 | 594 prods | 1%
+- Dispersión: $9.620.316 | 2%
+
+**NO TOCADO:** exportExcel, tabs, planos, comparativa 2025/2026, login, nav
+
+---
+
 ### V7.15 — 2026-06-11 — Análisis Final: visual headers azul/blanco + Top15 full-width
 
 **TOCO: `renderAnalisisFinal()` — resEl.innerHTML, topsEl.style, topsEl.innerHTML + mkRows**
