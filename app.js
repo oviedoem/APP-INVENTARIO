@@ -322,13 +322,18 @@ function applyRowMapping(rawRow, mapping) {
   row.unidades_real    = parseNum(row.unidades_real);
   row.peso_sistema     = parseNum(row.peso_sistema);
   row.peso_real        = parseNum(row.peso_real);
-  row.costo            = parseNum(row.costo) || parseNum(rawRow._costo) || 0;
+  // Usar siempre costo real del catálogo (SEM/PEM/EXH) como fuente de verdad para valores $
+  row.costo            = parseNum(rawRow._costo) || parseNum(row.costo) || 0;
   row.dif_valor_excel  = parseNum(row.dif_valor);
   // Calcular diferencias
   row.dif_unidades     = row.unidades_real - row.unidades_sistema;
+  // peso_sistema / peso_real: leer columna si existe; si no, calcular desde costo del catálogo
+  if (!row.peso_sistema && row.costo) row.peso_sistema = row.unidades_sistema * row.costo;
+  if (!row.peso_real    && row.costo) row.peso_real    = row.unidades_real    * row.costo;
   const difValorPorCosto = row.costo ? row.dif_unidades * row.costo : 0;
   const difValorPorTotales = row.peso_real - row.peso_sistema;
-  row.dif_peso         = row.costo ? difValorPorCosto : (row.dif_valor_excel || difValorPorTotales);
+  // dif_valor_excel (DIFERENCIA $) tiene prioridad: es el valor oficial del ERP
+  row.dif_peso         = row.dif_valor_excel ? row.dif_valor_excel : (row.costo ? difValorPorCosto : difValorPorTotales);
   row.abs_dif_unidades = Math.abs(row.dif_unidades);
   row.abs_dif_peso     = Math.abs(row.dif_peso);
   // Normalizar strings
@@ -576,6 +581,7 @@ function buildCatalogFromBodegas(wb) {
 
   readSheet('PEM');
   readSheet('SEM');
+  readSheet('EXH');
 
   // Asignar bodega a cada entrada del catálogo
   for (const cod of Object.keys(catalog)) {
