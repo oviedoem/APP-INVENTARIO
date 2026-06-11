@@ -2895,12 +2895,11 @@ function generateReport(mode) {
 
   // ── Modo COMPARATIVO: datos frescos en tiempo real ───────────────
   if (mode === 'comparative') {
-    const { d25, d26 } = getFilteredDataComp();   // DATOS FRESCOS — respeta filtros activos
+    const { d25, d26 } = getFilteredDataComp();
     if (!d25.length && !d26.length) {
       showToast('Sin datos para el reporte. Carga ambos años primero.', 'error'); return;
     }
 
-    // ── Cómputos desde datos frescos ───────────────────────────────
     const k25 = calcKPIs(d25), k26 = calcKPIs(d26);
     const m25 = calcMonetarySummary(d25), m26 = calcMonetarySummary(d26);
     const dExact  = k26.exact_unid - k25.exact_unid;
@@ -2919,7 +2918,7 @@ function generateReport(mode) {
 
     const mejoras  = [...famData].sort((a,b)=>a.delta-b.delta).filter(d=>d.delta<0).slice(0,6);
     const empeora  = [...famData].sort((a,b)=>b.delta-a.delta).filter(d=>d.delta>0).slice(0,6);
-    const topChart = [...famData].sort((a,b)=>(b.adp25+b.adp26)-(a.adp25+a.adp26)).slice(0,10);
+    const topFam   = [...famData].sort((a,b)=>(b.adp25+b.adp26)-(a.adp25+a.adp26)).slice(0,10);
 
     const pIdx25={}, pIdx26={};
     for(const r of d25){const k=r.codigo||r.producto;if(k)pIdx25[k]=r;}
@@ -2935,52 +2934,32 @@ function generateReport(mode) {
     const resueltos = allCodes.filter(c=>pIdx25[c]&&(pIdx25[c].dif_peso||0)<0&&(pIdx26[c]?.dif_peso||0)>=0).length;
     const nuevosProb= allCodes.filter(c=>pIdx26[c]&&(pIdx26[c].dif_peso||0)<0&&(!pIdx25[c]||(pIdx25[c].dif_peso||0)>=0)).length;
 
-    // ── Helpers de formato inline ───────────────────────────────────
-    const M  = v => '$ '+Math.round(v||0).toLocaleString('es-CL');
-    const P  = v => (+v||0).toFixed(1)+'%';
-    const N  = v => (v||0).toLocaleString('es-CL',{maximumFractionDigits:0});
-    const clr= v => v<0?'#dc2626':v>0?'#1A56DB':'#64748b';
-    const sgn= v => (v>=0?'+':'')+N(v);
-    const sgnM=v => (v>=0?'+ ':'')+M(v);
-    const sem= p => p>=95?'#16a34a':p>=85?'#d97706':'#dc2626';
+    const M   = v => '$ '+Math.round(v||0).toLocaleString('es-CL');
+    const P   = v => (+v||0).toFixed(1)+'%';
+    const N   = v => (v||0).toLocaleString('es-CL',{maximumFractionDigits:0});
+    const sgn = v => (v>=0?'+':'')+N(v);
+    const sgnM= v => (v>=0?'+ ':'')+M(v);
+    const sem = p => p>=95?'#16a34a':p>=85?'#d97706':'#dc2626';
+    const pct = (delta, base) => base>0 ? Math.round(Math.abs(delta)/base*100)+'%' : '—';
 
-    // ── ESTILOS COMPARTIDOS (inline en cada elemento) ───────────────
     const S = {
       th:  'background:#1A56DB;color:#fff;padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap;border:none',
       thR: 'background:#1A56DB;color:#fff;padding:7px 10px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap;border:none',
       td:  'padding:6px 10px;border-bottom:1px solid #f1f5f9;font-size:12px;white-space:nowrap',
       tdR: 'padding:6px 10px;border-bottom:1px solid #f1f5f9;font-size:12px;white-space:nowrap;text-align:right;font-family:monospace',
       tbl: 'width:100%;border-collapse:collapse;font-size:12px;margin:0',
-      sec: 'border-radius:10px;padding:16px 18px;margin:0 0 14px 0',
     };
     const td  = (v,extra='') => `<td style="${S.td}${extra}">${v??'—'}</td>`;
     const tdR = (v,c='',extra='') => `<td style="${S.tdR};color:${c||'#0f172a'}${extra}">${v??'—'}</td>`;
     const th  = v => `<th style="${S.th}">${v}</th>`;
     const thR = v => `<th style="${S.thR}">${v}</th>`;
 
-    // ── SVG BAR CHART — Top 10 familias por dispersión ─────────────
-    const maxV = Math.max(...topChart.map(d=>Math.max(d.adp25,d.adp26)),1);
-    const BAR_W=220, ROW_H=28, LABEL_W=150, PAD=12;
-    const svgH = topChart.length*ROW_H+PAD*2;
-    const bar = (v,y,col) => {
-      const w = Math.max(2,Math.round(v/maxV*BAR_W));
-      return `<rect x="${LABEL_W+2}" y="${y+3}" width="${w}" height="${ROW_H-8}" rx="3" fill="${col}" opacity="0.88"/>
-              <text x="${LABEL_W+w+6}" y="${y+ROW_H/2+4}" fill="${col}" font-size="10" font-weight="700">${M(v)}</text>`;
-    };
-    const svgRows = topChart.map((d,i)=>{
-      const y=PAD+i*ROW_H;
-      return `<text x="${LABEL_W-4}" y="${y+ROW_H/2+4}" fill="#334155" font-size="10" text-anchor="end">${trunc(d.f,20)}</text>
-              ${bar(d.adp25, y-6, '#94a3b8')}
-              ${bar(d.adp26, y+8, d.delta>0?'#dc2626':'#1A56DB')}`;
-    }).join('');
-    const svgChart = topChart.length ? `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${LABEL_W+BAR_W+120} ${svgH+30}" style="width:100%;max-width:580px;display:block;margin:8px 0 0">
-      <text x="${LABEL_W+2}" y="14" fill="#94a3b8" font-size="10" font-weight="700">■ 2025 (gris)</text>
-      <text x="${LABEL_W+80}" y="14" fill="#1A56DB" font-size="10" font-weight="700">■ 2026 (azul=mejora · rojo=empeora)</text>
-      <g transform="translate(0,18)">${svgRows}</g>
-    </svg>` : '';
+    const seccion = (titulo, colorBorde, colorFondo, colorTitulo, contenido) =>
+      `<div style="margin:0 0 16px 0;border:1px solid ${colorBorde};border-radius:8px;overflow:hidden">
+        <div style="background:${colorFondo};padding:10px 14px;font-weight:700;font-size:13px;color:${colorTitulo};border-bottom:1px solid ${colorBorde}">${titulo}</div>
+        <div>${contenido}</div>
+      </div>`;
 
-    // ── TABLA PRINCIPAL — datos frescos con colores inline ──────────
     const prodRows = allCodes.map(cod=>{
       const a=pIdx25[cod]||{}, b=pIdx26[cod]||{};
       const ref=Object.keys(a).length?a:b;
@@ -3010,12 +2989,11 @@ function generateReport(mode) {
       </tr>`;
     }).join('');
 
-    // ── HTML DEL REPORTE ───────────────────────────────────────────
     const fecha = new Date().toLocaleString('es-CL');
     const filtrosActivos = (() => {
       const f=state.filters.comparative, q=state.searchText.comparative||'';
       const parts=[...Object.entries(f).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`), ...(q?[`búsqueda: "${q}"`]:[])];
-      return parts.length ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:12px;font-size:11px">⚠ Filtros activos: ${parts.join(' · ')}</span>` : '<span style="color:#16a34a;font-size:11px">✓ Sin filtros — datos completos</span>';
+      return parts.length ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:12px;font-size:11px">Filtros activos: ${parts.join(' · ')}</span>` : '<span style="color:#16a34a;font-size:11px">Sin filtros — datos completos</span>';
     })();
 
     const html = `<!DOCTYPE html>
@@ -3025,26 +3003,20 @@ function generateReport(mode) {
   *{box-sizing:border-box}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#0f172a;margin:0;padding:24px 32px;font-size:13px;background:#f8fafc}
   #wrap{max-width:960px;margin:0 auto;background:#fff;border-radius:12px;padding:28px 32px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-  details{margin-bottom:10px}
-  details>summary{cursor:pointer;list-style:none;padding:11px 14px;border-radius:8px;font-weight:700;font-size:13px;user-select:none}
-  details>summary::-webkit-details-marker{display:none}
-  details>summary::before{content:'▶ ';font-size:10px;margin-right:4px;transition:transform .2s}
-  details[open]>summary::before{content:'▼ '}
-  details>.det-body{padding:12px 4px 4px}
   .sort-hint{font-size:11px;color:#94a3b8;font-style:italic}
   table{border-collapse:collapse}
   @media(max-width:680px){#wrap{padding:14px 10px}body{padding:8px}}
-  @media print{body{background:#fff;padding:0}#wrap{box-shadow:none;padding:12px} .no-print{display:none}}
+  @media print{body{background:#fff;padding:0}#wrap{box-shadow:none;padding:12px}.no-print{display:none}}
 </style>
 <script>
 (function(){
-  function ps(s){var v=s.replace(/[\$\s%+]/g,'').replace(/\./g,'').replace(',','.');return isNaN(+v)?s:+v;}
+  function ps(s){var v=s.replace(/[\$\s%+▲▼]/g,'').replace(/\./g,'').replace(',','.');return isNaN(+v)?s:+v;}
   function sortTbl(t,ci){
     var tb=t.querySelector('tbody'),ths=t.querySelectorAll('th'),th=ths[ci];
     var asc=th.dataset.s!=='1';
     [].forEach.call(ths,function(h){h.dataset.s='';h.style.background='#1A56DB';
       h.innerHTML=h.innerHTML.replace(/ [▲▼]$/,'');});
-    th.dataset.s=asc?'1':'0'; th.style.background='#1d4ed8';
+    th.dataset.s=asc?'1':'0';th.style.background='#1d4ed8';
     th.innerHTML+=(asc?' ▲':' ▼');
     var rows=[].slice.call(tb.querySelectorAll('tr'));
     rows.sort(function(a,b){
@@ -3066,12 +3038,12 @@ function generateReport(mode) {
 </head>
 <body><div id="wrap">
 
-<!-- ══ CABECERA ══════════════════════════════════════════════ -->
+<!-- CABECERA -->
 <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:20px;padding-bottom:16px;border-bottom:3px solid #1A56DB">
   <div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#1A56DB;margin-bottom:4px">Ferretería Oviedo · El Manzano</div>
-    <h1 style="margin:0;font-size:22px;font-weight:900;color:#0f172a">Comparativo Inventario 2025 → 2026</h1>
-    <div style="margin-top:5px;font-size:11px;color:#64748b">Generado: ${fecha} &nbsp;·&nbsp; ${filtrosActivos}</div>
+    <h1 style="margin:0;font-size:22px;font-weight:900;color:#0f172a">Comparativo Inventario 2025 vs 2026</h1>
+    <div style="margin-top:5px;font-size:11px;color:#64748b">Generado: ${fecha} · ${filtrosActivos}</div>
   </div>
   <div style="background:#0f172a;color:#fff;border-radius:8px;padding:8px 14px;font-size:11px;text-align:right;line-height:1.7">
     <div>Productos 2025: <strong>${N(d25.length)}</strong></div>
@@ -3079,18 +3051,18 @@ function generateReport(mode) {
   </div>
 </div>
 
-<!-- ══ KPI CARDS (email-ready) ════════════════════════════════ -->
-<div style="margin-bottom:20px">
+<!-- KPI CARDS -->
+<div style="margin-bottom:24px">
   <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;letter-spacing:.06em;margin-bottom:10px">Indicadores Clave</div>
   <table cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:10px;margin:-10px">
     <tr>
       ${[
-        {lbl:'Exactitud 2025',val:P(k25.exact_unid),sub:'% inventario correcto',c:sem(k25.exact_unid)},
-        {lbl:'Exactitud 2026',val:P(k26.exact_unid),sub:`Δ ${dExact>=0?'+':''}${P(dExact)} pp`,c:sem(k26.exact_unid)},
-        {lbl:'Dispersión $ 2025',val:M(m25.dispersion),sub:'diferencias absolutas',c:'#d97706'},
-        {lbl:'Dispersión $ 2026',val:M(m26.dispersion),sub:`Δ ${dDisp<=0?'▼ mejora':'▲ empeora'} ${M(Math.abs(dDisp))}`,c:dDisp<=0?'#16a34a':'#dc2626'},
-        {lbl:'Faltantes resueltos',val:N(resueltos),sub:'corregidos vs 2025',c:'#16a34a'},
-        {lbl:'Nuevos problemas',val:N(nuevosProb),sub:'faltantes nuevos en 2026',c:nuevosProb>0?'#dc2626':'#16a34a'},
+        {lbl:'Exactitud 2025',          val:P(k25.exact_unid), sub:'% inventario correcto',                              c:sem(k25.exact_unid)},
+        {lbl:'Exactitud 2026',          val:P(k26.exact_unid), sub:`Cambio: ${dExact>=0?'+':''}${P(dExact)} pp`,         c:sem(k26.exact_unid)},
+        {lbl:'Total DIFERENCIA $ 2025', val:M(m25.dispersion), sub:'suma total de diferencias',                          c:'#d97706'},
+        {lbl:'Total DIFERENCIA $ 2026', val:M(m26.dispersion), sub:`${dDisp<=0?'Mejora':'Empeora'} ${M(Math.abs(dDisp))}`, c:dDisp<=0?'#16a34a':'#dc2626'},
+        {lbl:'Faltantes resueltos',     val:N(resueltos),      sub:'corregidos respecto a 2025',                         c:'#16a34a'},
+        {lbl:'Nuevos faltantes',        val:N(nuevosProb),     sub:'productos con faltante nuevo en 2026',               c:nuevosProb>0?'#dc2626':'#16a34a'},
       ].map(({lbl,val,sub,c})=>`<td style="vertical-align:top">
         <div style="border:1px solid #e2e8f0;border-top:4px solid ${c};border-radius:9px;padding:12px 15px;min-width:130px;background:#fff">
           <div style="font-size:9px;text-transform:uppercase;font-weight:700;color:#64748b;letter-spacing:.05em;margin-bottom:5px">${lbl}</div>
@@ -3102,109 +3074,84 @@ function generateReport(mode) {
   </table>
 </div>
 
-<!-- ══ MINI INTERACTIVO — SECCIONES EXPANDIBLES ══════════════ -->
-<div style="margin-bottom:20px">
-  <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;letter-spacing:.06em;margin-bottom:10px">Análisis por Sección <span class="sort-hint">(haz clic para expandir)</span></div>
+<!-- ANÁLISIS POR SECCIONES -->
+<div style="margin-bottom:24px">
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;letter-spacing:.06em;margin-bottom:12px">Análisis Comparativo</div>
 
-  <!-- Resumen ejecutivo -->
-  <details open>
-    <summary style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af">
-      📋 Resumen Ejecutivo — ¿Cómo quedó el inventario 2026?
-    </summary>
-    <div class="det-body">
-      <table cellpadding="0" cellspacing="0" style="${S.tbl}">
-        <tr style="background:#f8fafc">
-          <th style="${S.th}">Indicador</th><th style="${S.thR}">2025</th><th style="${S.thR}">2026</th><th style="${S.thR}">Cambio</th>
-        </tr>
+  ${seccion('Resumen General — Resultados 2025 vs 2026', '#bfdbfe', '#eff6ff', '#1e40af',
+    `<table cellpadding="0" cellspacing="0" style="${S.tbl}">
+      <thead><tr><th style="${S.th}">Indicador</th><th style="${S.thR}">2025</th><th style="${S.thR}">2026</th><th style="${S.thR}">Cambio</th></tr></thead>
+      <tbody>
         <tr><td style="${S.td}">Exactitud inventario (unidades)</td>${tdR(P(k25.exact_unid),sem(k25.exact_unid))}${tdR(P(k26.exact_unid),sem(k26.exact_unid))}${tdR((dExact>=0?'+ ':'- ')+P(Math.abs(dExact))+' pp',dExact>=0?'#16a34a':'#dc2626',';font-weight:700')}</tr>
-        <tr style="background:#fafafa"><td style="${S.td}">Dispersión total $</td>${tdR(M(m25.dispersion),'#d97706')}${tdR(M(m26.dispersion),'#d97706')}${tdR(sgnM(dDisp),dDisp<=0?'#16a34a':'#dc2626',';font-weight:700')}</tr>
+        <tr style="background:#fafafa"><td style="${S.td}">Total DIFERENCIA $ (suma diferencias absolutas)</td>${tdR(M(m25.dispersion),'#d97706')}${tdR(M(m26.dispersion),'#d97706')}${tdR(sgnM(dDisp),dDisp<=0?'#16a34a':'#dc2626',';font-weight:700')}</tr>
         <tr><td style="${S.td}">Total $ Sistema</td>${tdR(M(m25.totalSistema))}${tdR(M(m26.totalSistema))}${tdR(sgnM(m26.totalSistema-m25.totalSistema),'#64748b')}</tr>
-        <tr style="background:#fafafa"><td style="${S.td}">Faltantes resueltos (2025→OK 2026)</td><td colspan="2"></td>${tdR(N(resueltos),'#16a34a',';font-weight:700')}</tr>
-        <tr><td style="${S.td}">Nuevos problemas (OK 2025→faltante 2026)</td><td colspan="2"></td>${tdR(N(nuevosProb),nuevosProb>0?'#dc2626':'#16a34a',';font-weight:700')}</tr>
-      </table>
-    </div>
-  </details>
+        <tr style="background:#fafafa"><td style="${S.td}">Faltantes resueltos (problema en 2025 corregido en 2026)</td><td style="${S.tdR}"></td><td style="${S.tdR}"></td>${tdR(N(resueltos),'#16a34a',';font-weight:700')}</tr>
+        <tr><td style="${S.td}">Nuevos faltantes (sin problema en 2025, con faltante en 2026)</td><td style="${S.tdR}"></td><td style="${S.tdR}"></td>${tdR(N(nuevosProb),nuevosProb>0?'#dc2626':'#16a34a',';font-weight:700')}</tr>
+      </tbody>
+    </table>`
+  )}
 
-  <!-- Gráfico familias -->
-  ${topChart.length ? `
-  <details open>
-    <summary style="background:#f0f7ff;border:1px solid #bfdbfe;color:#1e40af">
-      📊 Gráfico — Top ${topChart.length} Familias por Dispersión $
-      <span style="font-size:10px;font-weight:400;margin-left:8px">gris=2025 · azul=mejora 2026 · rojo=empeora 2026</span>
-    </summary>
-    <div class="det-body">${svgChart}</div>
-  </details>` : ''}
-
-  <!-- Mejoras -->
-  ${mejoras.length ? `
-  <details open>
-    <summary style="background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d">
-      ✅ ¿Qué mejoró? — ${mejoras.length} familias con menos dispersión en 2026
-    </summary>
-    <div class="det-body">
-      <table data-sort style="${S.tbl}">
-        <thead><tr>${th('Familia')}${thR('Dispersión $ 2025')}${thR('Dispersión $ 2026')}${thR('Mejora $')}${thR('% Cambio')}</tr></thead>
-        <tbody>${mejoras.map((d,i)=>`<tr style="background:${i%2?'#fafafa':'#fff'}">
+  ${topFam.length ? seccion(`Top ${topFam.length} Familias — DIFERENCIA $ 2025 vs 2026`, '#bfdbfe', '#f0f7ff', '#1e40af',
+    `<table data-sort style="${S.tbl}">
+      <thead><tr>${th('Familia')}${thR('DIFERENCIA $ 2025')}${thR('DIFERENCIA $ 2026')}${thR('Variación $')}${thR('Resultado')}</tr></thead>
+      <tbody>${topFam.map((d,i)=>{
+        const v=d.adp26-d.adp25;
+        return `<tr style="background:${i%2?'#fafafa':'#fff'}">
           ${td('<strong>'+esc(d.f)+'</strong>')}
-          ${tdR(M(d.adp25),'#dc2626')}
-          ${tdR(d.adp26>0?M(d.adp26):'Sin diferencias',d.adp26>0?'#d97706':'#16a34a')}
-          ${tdR(M(Math.abs(d.delta)),'#16a34a',';font-weight:700')}
-          ${tdR((Math.round(Math.abs(d.delta)/Math.max(d.adp25,1)*100))+'% menos','#16a34a')}
-        </tr>`).join('')}</tbody>
-      </table>
-    </div>
-  </details>` : ''}
+          ${tdR(d.adp25>0?M(d.adp25):'—','#d97706')}
+          ${tdR(d.adp26>0?M(d.adp26):'—','#d97706')}
+          ${v===0?tdR('Sin cambio','#64748b'):tdR((v<0?'▼ ':'▲ ')+M(Math.abs(v)),v<0?'#16a34a':'#dc2626',';font-weight:700')}
+          <td style="${S.tdR};color:${v<0?'#16a34a':v>0?'#dc2626':'#64748b'};font-weight:700">${v<0?'Mejoró':v>0?'Empeoró':'Sin cambio'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`) : ''}
 
-  <!-- Empeora -->
-  ${empeora.length ? `
-  <details open>
-    <summary style="background:#fff1f2;border:1px solid #fecdd3;color:#9f1239">
-      ⚠️ ¿Qué empeoró? — ${empeora.length} familias con más dispersión en 2026
-    </summary>
-    <div class="det-body">
-      <table data-sort style="${S.tbl}">
-        <thead><tr>${th('Familia')}${thR('Dispersión $ 2025')}${thR('Dispersión $ 2026')}${thR('Aumento $')}${thR('% Cambio')}</tr></thead>
-        <tbody>${empeora.map((d,i)=>`<tr style="background:${i%2?'#fafafa':'#fff'}">
-          ${td('<strong>'+esc(d.f)+'</strong>')}
-          ${tdR(d.adp25>0?M(d.adp25):'Sin diferencias',d.adp25>0?'#dc2626':'#64748b')}
-          ${tdR(M(d.adp26),'#dc2626')}
-          ${tdR('+'+M(d.delta),'#dc2626',';font-weight:700')}
-          ${tdR((Math.round(d.delta/Math.max(d.adp25,1)*100))+'% más','#dc2626')}
-        </tr>`).join('')}</tbody>
-      </table>
-    </div>
-  </details>` : ''}
+  ${mejoras.length ? seccion(`Familias que mejoraron — ${mejoras.length} con menor DIFERENCIA $ en 2026`, '#bbf7d0', '#f0fdf4', '#15803d',
+    `<table data-sort style="${S.tbl}">
+      <thead><tr>${th('Familia')}${thR('DIFERENCIA $ 2025')}${thR('DIFERENCIA $ 2026')}${thR('Mejora $')}${thR('% Mejora')}</tr></thead>
+      <tbody>${mejoras.map((d,i)=>`<tr style="background:${i%2?'#fafafa':'#fff'}">
+        ${td('<strong>'+esc(d.f)+'</strong>')}
+        ${tdR(M(d.adp25),'#dc2626')}
+        ${tdR(d.adp26>0?M(d.adp26):'Sin diferencias',d.adp26>0?'#d97706':'#16a34a')}
+        ${tdR('▼ '+M(Math.abs(d.delta)),'#16a34a',';font-weight:700')}
+        ${tdR(pct(d.delta,d.adp25)+' menos','#16a34a')}
+      </tr>`).join('')}</tbody>
+    </table>`) : ''}
 
-  <!-- Repetidas -->
-  ${repetidas.length ? `
-  <details>
-    <summary style="background:#fffbeb;border:1px solid #fde68a;color:#92400e">
-      🔄 Diferencias repetidas — ${repetidas.length} productos con faltante en 2025 Y 2026
-      <span style="font-size:10px;font-weight:400;margin-left:8px">Revisar proceso o posible hurto sistemático</span>
-    </summary>
-    <div class="det-body">
-      <table data-sort style="${S.tbl}">
-        <thead><tr>${th('Código')}${th('Descripción')}${th('Familia')}${thR('DIFERENCIA $ 2025')}${thR('DIFERENCIA $ 2026')}</tr></thead>
-        <tbody>${repetidas.map((r,i)=>`<tr style="background:${i%2?'#fafafa':'#fff'}">
-          <td style="${S.td};font-family:monospace;font-size:11px;color:#64748b">${esc(r.c)}</td>
-          <td style="${S.td}" title="${esc(r.desc)}">${trunc(r.desc,45)}</td>
-          ${td(trunc(r.fam,22))}
-          ${tdR(M(r.dp25),'#dc2626')}
-          ${tdR(M(r.dp26),'#dc2626',';font-weight:700')}
-        </tr>`).join('')}</tbody>
-      </table>
-    </div>
-  </details>` : ''}
+  ${empeora.length ? seccion(`Familias que empeoraron — ${empeora.length} con mayor DIFERENCIA $ en 2026`, '#fecdd3', '#fff1f2', '#9f1239',
+    `<table data-sort style="${S.tbl}">
+      <thead><tr>${th('Familia')}${thR('DIFERENCIA $ 2025')}${thR('DIFERENCIA $ 2026')}${thR('Aumento $')}${thR('% Aumento')}</tr></thead>
+      <tbody>${empeora.map((d,i)=>`<tr style="background:${i%2?'#fafafa':'#fff'}">
+        ${td('<strong>'+esc(d.f)+'</strong>')}
+        ${tdR(d.adp25>0?M(d.adp25):'Sin datos 2025','#dc2626')}
+        ${tdR(M(d.adp26),'#dc2626')}
+        ${tdR('▲ +'+M(d.delta),'#dc2626',';font-weight:700')}
+        ${tdR(d.adp25>0?pct(d.delta,d.adp25)+' más':'Familia nueva','#dc2626')}
+      </tr>`).join('')}</tbody>
+    </table>`) : ''}
+
+  ${repetidas.length ? seccion(`Productos con faltante en 2025 Y en 2026 — ${repetidas.length} productos`, '#fde68a', '#fffbeb', '#92400e',
+    `<p style="padding:8px 14px 4px;font-size:12px;color:#78350f;margin:0">Estos productos tuvieron DIFERENCIA $ negativa en ambos inventarios. Revisar proceso o posible pérdida sistemática.</p>
+    <table data-sort style="${S.tbl}">
+      <thead><tr>${th('Código')}${th('Descripción')}${th('Familia')}${thR('DIFERENCIA $ 2025')}${thR('DIFERENCIA $ 2026')}</tr></thead>
+      <tbody>${repetidas.map((r,i)=>`<tr style="background:${i%2?'#fafafa':'#fff'}">
+        <td style="${S.td};font-family:monospace;font-size:11px;color:#64748b">${esc(r.c)}</td>
+        <td style="${S.td}" title="${esc(r.desc)}">${trunc(r.desc,45)}</td>
+        ${td(trunc(r.fam,22))}
+        ${tdR(M(r.dp25),'#dc2626')}
+        ${tdR(M(r.dp26),'#dc2626',';font-weight:700')}
+      </tr>`).join('')}</tbody>
+    </table>`) : ''}
 </div>
 
-<!-- ══ TABLA PRINCIPAL ════════════════════════════════════════ -->
-<div style="margin-top:24px">
+<!-- TABLA PRINCIPAL POR PRODUCTO -->
+<div style="margin-top:8px">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
     <div>
-      <span style="font-size:14px;font-weight:700;color:#1e293b">Tabla Detalle por Producto</span>
+      <span style="font-size:14px;font-weight:700;color:#1e293b">Detalle por Producto</span>
       <span style="font-size:11px;color:#94a3b8;margin-left:8px">${N(Math.min(prodRows.length,300))} de ${N(prodRows.length)} productos · ordenados por peor DIFERENCIA $ 2026</span>
     </div>
-    <span class="sort-hint no-print">clic en encabezado para ordenar ▲▼</span>
+    <span class="sort-hint no-print">clic en encabezado para ordenar</span>
   </div>
   <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px">
     <table data-sort style="${S.tbl}">
@@ -3213,17 +3160,17 @@ function generateReport(mode) {
         ${thR('STOCK SISTEMA 25')}${thR('STOCK SISTEMA 26')}
         ${thR('DIFERENCIA 25')}${thR('DIFERENCIA 26')}
         ${thR('DIFERENCIA $ 25')}${thR('DIFERENCIA $ 26')}
-        ${thR('∆ DIFERENCIA $')}
+        ${thR('VARIACION $')}
       </tr></thead>
       <tbody>${prodTbodyRows}</tbody>
     </table>
   </div>
-  ${prodRows.length>300?`<p style="font-size:11px;color:#94a3b8;margin:6px 0 0">Mostrando los primeros 300 productos. Para ver todos, usa el botón Excel en la app.</p>`:''}
+  ${prodRows.length>300?`<p style="font-size:11px;color:#94a3b8;margin:6px 0 0">Mostrando los primeros 300 productos. Para exportar todos usa el botón Excel en la app.</p>`:''}
 </div>
 
-<!-- ══ PIE DE PÁGINA ══════════════════════════════════════════ -->
+<!-- PIE -->
 <div style="margin-top:32px;padding-top:12px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-  <span style="font-size:11px;color:#94a3b8">Generado con App Inventario El Manzano · Ferretería Oviedo</span>
+  <span style="font-size:11px;color:#94a3b8">App Inventario El Manzano · Ferretería Oviedo</span>
   <span style="font-size:11px;color:#94a3b8">${fecha}</span>
 </div>
 
