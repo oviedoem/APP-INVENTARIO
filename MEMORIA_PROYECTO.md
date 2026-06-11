@@ -313,6 +313,26 @@ exportRecountExcel()               // V4.1: Excel 2 hojas: Reconteo + Ranking_$
 
 ## HISTORIAL DE CAMBIOS
 
+### V7.15 — 2026-06-11 — Análisis Final: visual headers azul/blanco + Top15 full-width
+
+**TOCO: `renderAnalisisFinal()` — resEl.innerHTML, topsEl.style, topsEl.innerHTML + mkRows**
+
+- Resumen RESULTADOS: headers `#1e40af`/blanco/negrita, ancho 100%, valores neg=rojo/pos=azul, columna renombrada a "EN %"
+- Top 15: `topsEl.style = flex-column gap:24px` sobreescribe `charts-grid` (2 col → apilado full-width)
+- Top 15 expandido: 7 columnas (CÓDIGO, PRODUCTO, STOCK SIS., CONTEO, DIF. UNID., DIFERENCIA $, FAMILIA), truncación 52 chars, sin max-height
+- `mkRows`: white-space:nowrap, neg=rojo, pos=azul, familia en gris
+
+**AUDITORÍA INCONSISTENCIA (2026-06-11):**
+- Fila 9119 (Excel row 9120): producto 21205 "SOLDADURA 7018" tiene `STOCK SISTEMA = -0.1` (negativo). Causa raíz: dato incorrecto en ERP JustWeb, no en la app.
+- Diferencia app vs Excel RESULTADOS: ~$351 en faltantes, ~$108 en sobrantes → aceptable (0.006% del total)
+- App usa `dif_unidades` para clasificar faltantes/sobrantes en Resumen; Excel RESULTADOS usa sign(`DIFERENCIA $`). Pequeña discrepancia de 1-2 productos.
+- Advertencia "Fila 9119: valor negativo" = `peso_sistema < 0` (correcto, el dato viene malo del ERP)
+
+**NO TOCADO:** `calcKPIs`, `calcMonetarySummary`, `exportFinalExcel`, `buildTable` faltantes/hiper, botones descarga
+**node --check → OK ✓ | commits 4798a7f + 7c6ac46 | push main**
+
+---
+
 ### V7.14 — 2026-06-10 — Fix datos pegados al limpiar + título Análisis Final
 
 **TOCO: `showWelcome()` en app.js**
