@@ -9,10 +9,10 @@
 ### PRIORIDAD 0 — Aislamiento absoluto
 
 ```
-TRABAJAR SOLO EN:   D:\ferreteria-oviedo\APP-INVENTARIO\
+TRABAJAR SOLO EN:   E:\APP-INVENTARIO\
 NUNCA TOCAR:        panel-admin.html · panel-cliente.html · panel-vendedor.html
-                    D:\ferreteria-oviedo\  (raíz del otro proyecto)
-                    D:\ferreteria-oviedo-github\
+                    E:\ferreteria-oviedo\  (raíz del otro proyecto)
+                    E:\ferreteria-oviedo-github\
 ```
 
 Este proyecto es INDEPENDIENTE del panel admin/cliente/vendedor.
@@ -44,7 +44,7 @@ Antes de terminar cualquier sesión donde se hayan modificado archivos:
 2. Actualizar `MEMORIA_PROYECTO.md` con los cambios de la sesión
 3. Ejecutar el sync a GitHub:
    ```
-   D:\ferreteria-oviedo\APP-INVENTARIO\ACTUALIZAR_GITHUB_APP_INVENTARIO.bat
+   E:\APP-INVENTARIO\ACTUALIZAR_GITHUB_APP_INVENTARIO.bat
    ```
 4. Confirmar el commit exitoso antes de cerrar
 
@@ -60,7 +60,7 @@ jerárquicamente hasta nivel de producto.
 
 **Directorio activo:**
 ```
-D:\ferreteria-oviedo\APP-INVENTARIO\
+E:\APP-INVENTARIO\
 ```
 
 **Archivos principales:**
@@ -312,6 +312,21 @@ exportRecountExcel()               // V4.1: Excel 2 hojas: Reconteo + Ranking_$
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### V7.14 — 2026-06-10 — Fix datos pegados al limpiar + título Análisis Final
+
+**TOCO: `showWelcome()` en app.js**
+- Antes solo ocultaba `view-2025`, `view-2026`, `view-comparative`.
+- Al presionar "Limpiar" o "Limpiar todo" desde `view-final`, `view-mejoras`, `view-reconteo`, `view-2025v2` o `view-planos`, el DOM de esas vistas quedaba visible con datos en pantalla.
+- Fix: `showWelcome()` ahora oculta la lista completa de vistas: `['2025','2026','comparative','checklist','planos','2025v2','reconteo','mejoras','final']`.
+
+**TOCO: `index.html` L821**
+- Título en `view-final`: `"Análisis Final · Informe para el dueño"` → `"Análisis Final · Inventario Sucursal El Manzano"`.
+
+**NO TOCADO:** `clearAllApp()`, `clearAllData()`, `refreshView()`, ningún tab, flujo ni botón.
+**node --check → OK ✓ | commit 10fddc2 | push main**
+
+---
 
 ### V7.13 — 2026-06-01 — Migración a repo propio + GitHub Pages + fix persistencia
 
@@ -681,7 +696,7 @@ if (!tbody) return; // vista correlativo eliminada (V5.3) — evita TypeError qu
 
 **Impacto:** `window._patentesCargadas` ahora se llena correctamente al cargar el Excel → `renderCoverageZonas()`, `applyPatenteCellStates()` y `renderPlanoZonaProgress()` reciben datos reales → panel de avance y colores del plano funcionan automáticamente.
 
-**Regla persistente guardada en memoria:** NUNCA tocar `D:\ferreteria-oviedo\` (raíz). Solo `D:\ferreteria-oviedo\APP-INVENTARIO\`.
+**Regla persistente guardada en memoria:** NUNCA tocar `E:\ferreteria-oviedo\` (raíz). Solo `E:\APP-INVENTARIO\`.
 
 **NO tocado:** `getPlanoContados`, `_buildCoverageZonas`, `renderCoverageZonas`, `applyPatenteCellStates`, `renderPlanoZonaProgress`, `loadFiles`
 
