@@ -1328,7 +1328,7 @@ function getFilteredDataComp() {
 
 function getFilteredDataFinal() {
   const src = state.data2026?.length ? state.data2026 : state.data2025;
-  const f   = state.filters.final;
+  const f   = state.filters.final || {};
   const q   = (state.searchText.final || '').toLowerCase().trim();
   return src.filter(r =>
     (!f.marca      || r.marca      === f.marca)      &&
@@ -3372,6 +3372,11 @@ function refreshView() {
   } else if (mode === '2026') {
     if (has26) renderMode('2026');
     else showToast('Carga datos de 2026 primero.', 'info');
+  } else if (mode === 'final') {
+    document.getElementById('view-final')?.classList.remove('hidden');
+    renderAnalisisFinal();
+  } else if (mode === 'reconteo' || mode === 'mejoras' || mode === '2025v2') {
+    document.getElementById(`view-${mode}`)?.classList.remove('hidden');
   } else {
     renderModeComp();
   }
@@ -5938,9 +5943,10 @@ function clearSavedSession() {
     state.data2025 = [];
     state.data2026 = [];
     state.filters  = {
-      '2025':      { marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'', bodega:'' },
-      '2026':      { marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'', bodega:'' },
-      comparative: { marca:'', familia:'', perfamilia:'', zona:'', area:'' },
+      '2025':      { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'', patente:'', bodega:'' },
+      '2026':      { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'', patente:'', bodega:'' },
+      comparative: { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'' },
+      final:       { marca:'', familia:'', perfamilia:'', subfamilia:'' },
     };
     state.drilldown = { '2025':{ hiperfamilia:'', familia:'', marca:'' }, '2026':{ hiperfamilia:'', familia:'', marca:'' } };
     state.ddState   = { '2025':{ groupBy:'familia', filterField:null, filterValue:null }, '2026':{ groupBy:'familia', filterField:null, filterValue:null } };
@@ -5972,9 +5978,14 @@ async function restoreSession() {
   if (rows25?.length) { state.data2025 = rows25; document.getElementById('status-2025').textContent = `${rows25.length} filas (guardado)`; document.getElementById('status-2025').className = 'upload-status ok'; }
   if (rows26?.length) { state.data2026 = rows26; document.getElementById('status-2026').textContent = `${rows26.length} filas (guardado)`; document.getElementById('status-2026').className = 'upload-status ok'; }
 
-  // Restaurar estado
-  if (snap.filters)       Object.assign(state.filters,       snap.filters);
-  if (snap.searchText)    Object.assign(state.searchText,    snap.searchText);
+  // Restaurar estado (merge shallow; garantizar claves nuevas que el snapshot antiguo no tenga)
+  if (snap.filters)    Object.assign(state.filters, snap.filters);
+  if (!state.filters.final)                                      state.filters.final = { marca:'', familia:'', perfamilia:'', subfamilia:'' };
+  if (!('subfamilia' in (state.filters.comparative || {})))      state.filters.comparative = Object.assign({ subfamilia:'' }, state.filters.comparative);
+  if (!('subfamilia' in (state.filters['2025'] || {})))          state.filters['2025'].subfamilia = '';
+  if (!('subfamilia' in (state.filters['2026'] || {})))          state.filters['2026'].subfamilia = '';
+  if (snap.searchText) Object.assign(state.searchText, snap.searchText);
+  if (!state.searchText.final) state.searchText.final = '';
   if (snap.chartMode)     Object.assign(state.chartMode,     snap.chartMode);
   if (snap.drilldown)     Object.assign(state.drilldown,     snap.drilldown);
   if (snap.ddState)       Object.assign(state.ddState,       snap.ddState);
