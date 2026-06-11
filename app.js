@@ -2926,24 +2926,22 @@ function generateReporteFinal(mode) {
   const year = state.data2026?.length ? '2026' : '2025';
   const k = calcKPIs(data);
   const m = calcMonetarySummary(data);
-  let falt = 0, sobr = 0, faltV = 0, sobrV = 0;
-  for (const r of data) {
-    if (r.dif_unidades < 0) { falt++; faltV += Math.abs(r.dif_peso || 0); }
-    else if (r.dif_unidades > 0) { sobr++; sobrV += Math.abs(r.dif_peso || 0); }
-  }
-  // Helper local: formato porcentaje chileno con signo, base monetaria (NO redefinir fmtPct global)
-  const _pct = (val, decimals) => {
+  // Clasificación por dif_peso (consistente con renderAnalisisFinal y con el Excel oficial)
+  const falt = data.filter(r => (r.dif_peso || 0) < 0).length;
+  const sobr = data.filter(r => (r.dif_peso || 0) > 0).length;
+  const faltV = Math.abs(m.difNeg);
+  const sobrV = m.difPos;
+  // Helper local: formato porcentaje chileno con signo, entero (igual al informe correo)
+  const _pct = (val) => {
     if (!isFinite(val)) return '—';
-    return (val >= 0 ? '+' : '') + val.toFixed(decimals === undefined ? 2 : decimals).replace('.', ',') + '%';
+    const r = Math.round(val);
+    return (r >= 0 ? '+' : '') + r + '%';
   };
   const _pctBase = m.totalSistema || 1;
   const pctDif   = m.totalSistema > 0 ? m.difTotal   / _pctBase * 100 : null;
   const pctDifP  = m.totalSistema > 0 ? m.difPos      / _pctBase * 100 : null;
   const pctDifN  = m.totalSistema > 0 ? m.difNeg      / _pctBase * 100 : null;
   const pctDisp  = m.totalSistema > 0 ? m.dispersion  / _pctBase * 100 : null;
-  // Estos se usan solo en el texto sub de cards (base unidades — conservar para no romper)
-  const pctFalt = k.us > 0 ? (Math.abs(data.reduce((s,r)=>s+(r.dif_unidades<0?r.dif_unidades:0),0))/k.us*100).toFixed(2) : '0.00';
-  const pctSobr = k.us > 0 ? (data.reduce((s,r)=>s+(r.dif_unidades>0?r.dif_unidades:0),0)/k.us*100).toFixed(2) : '0.00';
 
   // Agrupar por hiperfamilia para gráficos
   const byHiper = aggregateBy(data, 'perfamilia').sort((a,b)=>b.adp-a.adp);
@@ -3089,7 +3087,7 @@ tfoot td{font-weight:700;background:#dbeafe;padding:5px 8px;border-top:2px solid
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Dispersión Total</div>
-      <div class="kpi-value">${pctDisp !== null ? pctDisp.toFixed(2).replace('.',',') + '%' : '—'}</div>
+      <div class="kpi-value">${pctDisp !== null ? Math.round(pctDisp) + '%' : '—'}</div>
       <div class="kpi-sub">$ ${Math.round(m.dispersion).toLocaleString('es-CL')}</div>
     </div>
   </div>
@@ -3337,10 +3335,16 @@ rfRenderGraficos(RF_DATA);
 </body>
 </html>`;
 
-  const win = window.open('', '_blank');
-  if (!win) { showToast('El navegador bloqueó la ventana emergente. Permite ventanas emergentes para esta app.', 'error'); return; }
-  win.document.write(html);
-  win.document.close();
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), {
+    href: url,
+    download: `Reporte_Final_Inventario_${year}_${today()}.html`
+  });
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  showToast('Reporte descargado — ábrelo en el navegador para imprimir o pegar en correo.', 'ok');
 }
 
 // ── PRINT MODE ─────────────────────────────────────────────────
