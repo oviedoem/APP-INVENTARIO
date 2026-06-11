@@ -313,6 +313,28 @@ exportRecountExcel()               // V4.1: Excel 2 hojas: Reconteo + Ranking_$
 
 ## HISTORIAL DE CAMBIOS
 
+### V7.18 — 2026-06-11 — Rediseño completo Tab Comparativo
+
+**TOCO: `app.js` (5 funciones + 1 init) + `style.css` (nuevas clases)**
+
+**Cambios app.js:**
+- `state.searchText`: agregado `comparative: ''`
+- `renderFilters`: búsqueda código/descripción habilitada para modo `comparative` (antes no tenía input)
+- `getFilteredDataComp`: aplica `state.searchText.comparative` para filtrar `d25`/`d26`
+- `renderComparativeTable` (reescritura): agrupación por `código` (más fiable que marca+familia+producto), columnas `DIFERENCIA`/`DIFERENCIA $` (nomenclatura ERP), colores `comp-pos` (azul) positivos / `comp-neg` (rojo) negativos, tabla `comp-table` con headers azules
+- `renderInsightsComp` (reescritura): 4 secciones — resumen ejecutivo (exactitud, dispersión, faltantes resueltos, nuevos problemas), familias que mejoraron, familias que empeoraron, productos con diferencias repetidas en ambos años
+- `generateReport` modo `comparative` (reescritura): HTML descargable con estado en vivo completo (KPIs+análisis+categoría+tabla), JS sorting interactivo, estilos autocontenidos
+- `esc()` helper para escape HTML (títulos y celdas)
+
+**Cambios style.css:**
+- `.comp-table th`: color `#1A56DB` (azul, antes `#1e293b` navy)
+- Nuevas clases: `comp-pos/neg/mejor/peor/null`, `comp-analysis-section` (4 variantes), `comp-mini-table`, `comp-resumen-grid/card`, `comp-yr25/yr26/arrow`
+
+**Archivos 2025 verificados:**
+- `ANALISIS_EL MANZANO-V2025....final.xlsx`: compatible 100% — 9163 prods, HIPERMALIA/FAMILIA/DIFERENCIA $ mapean via FIELD_ALIASES, Total Sistema $550.194.989
+
+**Commits:** `7051d2e` (app+css) · `f3d0028` (cache-bust v7.18)
+
 ### V7.16 — 2026-06-11 — Fix consistencia Resumen RESULTADOS con informe oficial
 
 **TOCO: `app.js` (4 funciones) + `ANALISIS_EL MANZANO-V2026.xlsx` (TABLA_ANALISIS)**
