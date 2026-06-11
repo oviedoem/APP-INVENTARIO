@@ -2776,7 +2776,7 @@ ${tablesHtml}
 // ── GESTIÓN DE VISTAS ──────────────────────────────────────────
 function showWelcome() {
   document.getElementById('welcome-screen').style.display = '';
-  ['2025','2026','comparative'].forEach(m =>
+  ['2025','2026','comparative','checklist','planos','2025v2','reconteo','mejoras','final'].forEach(m =>
     document.getElementById(`view-${m}`)?.classList.add('hidden'));
 }
 
