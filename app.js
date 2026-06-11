@@ -4161,69 +4161,32 @@ function renderAnalisisFinal() {
 
   const k = calcKPIs(data);
   const m = calcMonetarySummary(data);
-  let falt = 0, sobr = 0, faltV = 0, sobrV = 0;
-  for (const r of data) {
-    if (r.dif_unidades < 0) { falt++; faltV += Math.abs(r.dif_peso || 0); }
-    else if (r.dif_unidades > 0) { sobr++; sobrV += Math.abs(r.dif_peso || 0); }
-  }
+  // Clasificación por dif_peso (sign $) — consistente con Excel y calcMonetarySummary
+  const falt = data.filter(r => (r.dif_peso || 0) < 0).length;
+  const sobr = data.filter(r => (r.dif_peso || 0) > 0).length;
+  const faltV = Math.abs(m.difNeg);
+  const sobrV = m.difPos;
 
   // ── Cuadro RESULTADOS ──────────────────────────────────────────
   const resEl = document.getElementById('final-resultados');
   if (resEl) {
     const pctDisp = m.totalSistema > 0 ? (m.dispersion / m.totalSistema * 100).toFixed(2) : '0.00';
-    const pctFalt = k.us > 0 ? (Math.abs(data.reduce((s,r)=>s+(r.dif_unidades<0?r.dif_unidades:0),0))/k.us*100).toFixed(2) : '0.00';
-    const pctSobr = k.us > 0 ? (data.reduce((s,r)=>s+(r.dif_unidades>0?r.dif_unidades:0),0)/k.us*100).toFixed(2) : '0.00';
-    const thS = 'background:#1e40af;color:#fff;font-weight:700;padding:9px 12px';
-    const cPos = '#1e40af', cNeg = '#dc2626', cGreen = '#16a34a';
+    const pctSobr = m.totalSistema > 0 ? (sobrV / m.totalSistema * 100).toFixed(2) : '0.00';
+    const pctFalt = m.totalSistema > 0 ? (faltV / m.totalSistema * 100).toFixed(2) : '0.00';
     resEl.innerHTML = `
       <div class="section-card">
         <div class="section-card-header">
           <h3>📊 Resumen RESULTADOS · Inventario ${year}</h3>
         </div>
-        <table class="data-table" style="width:100%;min-width:520px">
-          <thead><tr>
-            <th style="${thS}">CONCEPTO</th>
-            <th class="num" style="${thS}">UNIDADES</th>
-            <th class="num" style="${thS}">VALOR $</th>
-            <th class="num" style="${thS}">EN %</th>
-          </tr></thead>
+        <table class="data-table" style="max-width:680px">
+          <thead><tr><th>Concepto</th><th class="num">Unidades</th><th class="num">Valor $</th><th class="num">%</th></tr></thead>
           <tbody>
-            <tr>
-              <td><strong>Total Sistema</strong></td>
-              <td class="num" style="color:${cPos};font-weight:600">${fmt(k.us)}</td>
-              <td class="num" style="color:${cPos};font-weight:600">${fmtMoney(k.ps)}</td>
-              <td class="num">—</td>
-            </tr>
-            <tr>
-              <td><strong>Total Conteo</strong></td>
-              <td class="num" style="color:${cPos};font-weight:600">${fmt(k.ur)}</td>
-              <td class="num" style="color:${cPos};font-weight:600">${fmtMoney(k.pr)}</td>
-              <td class="num">—</td>
-            </tr>
-            <tr>
-              <td><strong>Diferencias</strong></td>
-              <td class="num" style="color:${k.du<0?cNeg:cPos};font-weight:700">${k.du>=0?'+':''}${fmt(k.du)}</td>
-              <td class="num" style="color:${m.difTotal<0?cNeg:cPos};font-weight:700">${fmtMoney(m.difTotal)}</td>
-              <td class="num">—</td>
-            </tr>
-            <tr>
-              <td><strong style="color:${cGreen}">Diferencias (+) sobrantes</strong></td>
-              <td class="num" style="color:${cGreen};font-weight:600">${fmt(sobr)} prods</td>
-              <td class="num" style="color:${cPos};font-weight:600">${fmtMoney(sobrV)}</td>
-              <td class="num" style="color:${cPos};font-weight:600">${pctSobr}%</td>
-            </tr>
-            <tr>
-              <td><strong style="color:${cNeg}">Diferencias (−) faltantes</strong></td>
-              <td class="num" style="color:${cNeg};font-weight:600">${fmt(falt)} prods</td>
-              <td class="num" style="color:${cNeg};font-weight:600">${fmtMoney(faltV)}</td>
-              <td class="num" style="color:${cNeg};font-weight:600">${pctFalt}%</td>
-            </tr>
-            <tr style="font-weight:700;border-top:2px solid #cbd5e1">
-              <td><strong>Dispersión Total</strong></td>
-              <td class="num">${fmt(k.adu)} unid</td>
-              <td class="num">${fmtMoney(m.dispersion)}</td>
-              <td class="num">${pctDisp}%</td>
-            </tr>
+            <tr><td><strong>Total Sistema</strong></td><td class="num">${fmt(k.us)}</td><td class="num">${fmtMoney(k.ps)}</td><td class="num">—</td></tr>
+            <tr><td><strong>Total Conteo</strong></td><td class="num">${fmt(k.ur)}</td><td class="num">${fmtMoney(k.pr)}</td><td class="num">—</td></tr>
+            <tr><td><strong>Diferencias</strong></td><td class="num">${k.du>=0?'+':''}${fmt(k.du)}</td><td class="num">${fmtMoney(m.difTotal)}</td><td class="num">—</td></tr>
+            <tr style="color:var(--green);font-weight:700;font-size:1.05em"><td><strong>Diferencias (+) sobrantes</strong></td><td class="num">${fmt(sobr)} prods</td><td class="num">${fmtMoney(sobrV)}</td><td class="num">${pctSobr}%</td></tr>
+            <tr style="color:var(--red);font-weight:700;font-size:1.05em"><td><strong>Diferencias (−) faltantes</strong></td><td class="num">${fmt(falt)} prods</td><td class="num">${fmtMoney(faltV)}</td><td class="num">${pctFalt}%</td></tr>
+            <tr style="font-weight:700"><td><strong>Dispersión</strong></td><td class="num">${fmt(k.adu)} unid</td><td class="num">${fmtMoney(m.dispersion)}</td><td class="num">${pctDisp}%</td></tr>
           </tbody>
         </table>
       </div>`;
