@@ -4176,9 +4176,9 @@ function renderAnalisisFinal() {
   // ── Cuadro RESULTADOS ──────────────────────────────────────────
   const resEl = document.getElementById('final-resultados');
   if (resEl) {
-    const pctDisp = m.totalSistema > 0 ? (m.dispersion / m.totalSistema * 100).toFixed(2) : '0.00';
-    const pctSobr = m.totalSistema > 0 ? (sobrV / m.totalSistema * 100).toFixed(2) : '0.00';
-    const pctFalt = m.totalSistema > 0 ? (faltV / m.totalSistema * 100).toFixed(2) : '0.00';
+    const pctDisp = m.totalSistema > 0 ? Math.round(m.dispersion / m.totalSistema * 100) : 0;
+    const pctSobr = m.totalSistema > 0 ? Math.round(sobrV / m.totalSistema * 100) : 0;
+    const pctFalt = m.totalSistema > 0 ? Math.round(faltV / m.totalSistema * 100) : 0;
     resEl.innerHTML = `
       <div class="section-card">
         <div class="section-card-header">
