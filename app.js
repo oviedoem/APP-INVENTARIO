@@ -101,7 +101,7 @@ function isBlankLike(v) {
   const s = v.toString().trim();
   if (!s) return true;
   const n = normalizeHeader(s).replace(/_/g, '');
-  return ['NA','N/A','SINDATO','SINDATOS','NULL','UNDEFINED','ERROR'].includes(n) ||
+  return ['NA','N/A','SINDATO','SINDATOS','NULL','UNDEFINED','ERROR','SINCLASIFICAR'].includes(n) ||
          s === '#N/A' || s === '#VALUE!' || s === '#REF!';
 }
 
@@ -501,24 +501,32 @@ function buildLocationIndex(wb) {
 }
 
 // Construye índice de familia/marca desde hoja 'familia'
+// Guarda claves exactas Y normalizadas (normalizeSku) para cubrir diferencias de formato
 function buildFamiliaIndex(wb) {
-  const sheet = findSheetName(wb, ['familia']);
+  const sheet = findSheetName(wb, ['familia','FAMILIA','Familia']);
   if (!sheet) return {};
   try {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheet], { defval: '', raw: false });
     const index = {};
     for (const r of rows) {
-      const cod = cleanText(rowValueByAliases(r, ['Codigo','CODIGO','Codigo_Tecnico','CODIGO_TECNICO']));
+      const cod = cleanText(rowValueByAliases(r, ['Codigo','CODIGO','Codigo_Tecnico','CODIGO_TECNICO','cod','COD']));
       if (!cod) continue;
-      index[cod] = {
+      const entry = {
         marca:        cleanText(rowValueByAliases(r, ['Marca','MARCA'])),
-        hiperfamilia: cleanText(rowValueByAliases(r, ['Hiperfamilia','HIPERFAMILIA','HIPERMALIA'])),
+        hiperfamilia: cleanText(rowValueByAliases(r, ['Hiperfamilia','HIPERFAMILIA','HIPERMALIA','HiperFamilia'])),
         familia:      cleanText(rowValueByAliases(r, ['Familia','FAMILIA'])),
-        subfamilia:   cleanText(rowValueByAliases(r, ['SubFamilia','SUBFAMILIA','Subfamilia','SUB_FAMILIA'])),
+        subfamilia:   cleanText(rowValueByAliases(r, ['SubFamilia','SUBFAMILIA','Subfamilia','SUB_FAMILIA','Sub_Familia'])),
       };
+      index[cod] = entry;                              // clave exacta (trim)
+      const normCod = normalizeSku(cod);
+      if (normCod && normCod !== cod) index[normCod] = entry; // clave normalizada
+      // También guardar como string numérico puro por si Excel convierte a float
+      const numStr = String(parseFloat(cod));
+      if (numStr !== 'NaN' && numStr !== cod && numStr !== normCod) index[numStr] = entry;
     }
+    if (DEBUG) console.debug('[inventario] famIndex cargado', { sheet, filas: rows.length, claves: Object.keys(index).length });
     return index;
-  } catch { return {}; }
+  } catch(e) { console.warn('[inventario] buildFamiliaIndex error', e); return {}; }
 }
 
 // Construye índice de datos faltantes (marca/familia/hiperfamilia) desde hoja 'datos_faltantes'
@@ -691,10 +699,12 @@ async function readFileData(file) {
           const bodegaIndex  = Object.fromEntries(Object.entries(catalogIndex).filter(([,v]) => v.bodega).map(([k,v]) => [k, v.bodega]));
           const enriched = rows.map(r => {
             const cod = cleanText(rowValueByAliases(r, ['Codigo_tecnico','CODIGO','Codigo_Tecnico','Codigo','CODIGO_TECNICO']));
-            const loc = locIndex[cod] || {};
-            const fam = famIndex[cod] || {};
-            const mis = (missingIndex && cod && missingIndex[cod]) || {};
-            const cat = catalogIndex[cod] || {};
+            const codNorm = normalizeSku(cod);
+            const codNum  = String(parseFloat(cod));
+            const loc = locIndex[cod] || locIndex[codNorm] || {};
+            const fam = famIndex[cod] || famIndex[codNorm] || (codNum !== 'NaN' ? famIndex[codNum] : undefined) || {};
+            const mis = (missingIndex && cod && (missingIndex[cod] || missingIndex[codNorm])) || {};
+            const cat = catalogIndex[cod] || catalogIndex[codNorm] || {};
             return {
               ...r,
               _area:    cleanText(rowValueByAliases(r, ['AREA','ÁREA'])) || cleanText(loc.area),
