@@ -313,6 +313,46 @@ exportRecountExcel()               // V4.1: Excel 2 hojas: Reconteo + Ranking_$
 
 ## HISTORIAL DE CAMBIOS
 
+### V7.23 — 2026-06-11 — Fix reporte comparativo: sin SVG, secciones siempre visibles
+
+**TOCO: `app.js` (bloque comparative de `generateReport`) + `index.html` (cache-bust v=7.23)**
+
+**Cambios app.js:**
+- `generateReport` modo `comparative`: reescritura del HTML generado
+  - Eliminado SVG bar chart (barras superpuestas por ROW_H insuficiente)
+  - Reemplazado con tabla simple: Familia | DIFERENCIA $ 2025 | DIFERENCIA $ 2026 | Variación $ | Resultado
+  - Eliminado `<details>/<summary>` (secciones expandibles = confusas para usuarios amateurs)
+  - Secciones ahora siempre visibles con `seccion()` helper (div con borde de color)
+  - Fix % absurdos: nueva función `pct(delta, base)` — cuando base=0 devuelve '—' en lugar de "18783600% más"
+  - KPI labels: "Dispersión $" → "Total DIFERENCIA $" (lenguaje de planilla)
+  - Tabla empeoraron: "Familia nueva" cuando adp25=0 en lugar de % absurdo
+  - Columna "∆ DIFERENCIA $" → "VARIACION $"
+  - Leyenda sort: "clic en encabezado para ordenar" (sin "▲▼" extra)
+- `topChart` renombrado a `topFam`
+- Eliminado: `maxV`, `BAR_W`, `ROW_H`, `LABEL_W`, `PAD`, `svgH`, `bar()`, `svgRows`, `svgChart`
+- Mantenido: misma lógica de datos, KPI cards, tabla 300 productos, sorting JS inline
+
+**Commit:** `ac7ee7d`
+
+---
+
+### V7.19 — 2026-06-11 — generateReport comparativo desde datos frescos
+
+**TOCO: `app.js` (bloque comparative de `generateReport`) + `index.html` (cache-bust)**
+
+**Cambios app.js:**
+- `generateReport` modo `comparative` (reescritura completa del bloque):
+  - Reemplaza captura DOM por `getFilteredDataComp()` → datos frescos en tiempo real, respeta filtros activos al momento de descarga
+  - KPI cards con 100% inline styles → email-safe, no requiere hoja de estilos externa
+  - SVG bar chart horizontal: top-10 familias por dispersión $ (gris=2025, azul/rojo=2026)
+  - Secciones `<details>/<summary>` expandibles: resumen ejecutivo, gráfico, mejoras, empeora, diferencias repetidas
+  - Tabla principal hasta 300 productos, colores inline, sorteable en navegador (JS inline)
+  - Indicador de filtros activos en cabecera del reporte
+
+**Commit:** `5d1d3a0`
+
+---
+
 ### V7.18 — 2026-06-11 — Rediseño completo Tab Comparativo
 
 **TOCO: `app.js` (5 funciones + 1 init) + `style.css` (nuevas clases)**
