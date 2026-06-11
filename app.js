@@ -19,7 +19,7 @@ const state = {
     '2026':      { marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'', bodega:'' },
     comparative: { marca:'', familia:'', perfamilia:'', zona:'', area:'' }
   },
-  searchText: { '2025': '', '2026': '' },
+  searchText: { '2025': '', '2026': '', comparative: '' },
   chartMode:  { '2025': 'unidades', '2026': 'unidades' },
   // Embudo jerárquico (nuevo V2)
   drilldown: {
@@ -1299,12 +1299,14 @@ function clearFilters(mode) {
 
 function getFilteredDataComp() {
   const f = state.filters.comparative;
+  const q = (state.searchText.comparative || '').toLowerCase().trim();
   const fn = r =>
     (!f.marca      || r.marca      === f.marca)      &&
     (!f.familia    || r.familia    === f.familia)    &&
     (!f.perfamilia || r.perfamilia === f.perfamilia) &&
     (!f.zona       || r.zona       === f.zona)       &&
-    (!f.area       || r.area       === f.area);
+    (!f.area       || r.area       === f.area)       &&
+    (!q || (r.producto||'').toLowerCase().includes(q) || (r.codigo||'').toLowerCase().includes(q));
   return { d25: state.data2025.filter(fn), d26: state.data2026.filter(fn) };
 }
 
@@ -1735,7 +1737,7 @@ function renderFilters(mode) {
 
   const anyActive = groups.some(([field]) => f[field]) || q;
 
-  const searchRow = mode !== 'comparative' ? `
+  const searchRow = `
     <div class="seg-search-row">
       <span class="seg-search-icon">🔍</span>
       <input class="seg-search-input" id="search-${mode}" type="text"
@@ -1743,9 +1745,7 @@ function renderFilters(mode) {
              value="${q.replace(/"/g,'&quot;')}"
              oninput="setSearch('${mode}',this.value)">
       ${anyActive ? `<button class="btn btn-xs seg-clear-btn" onclick="clearFilters('${mode}')">✕ Limpiar</button>` : ''}
-    </div>` : (anyActive ? `<div class="seg-search-row" style="justify-content:flex-end">
-      <button class="btn btn-xs seg-clear-btn" onclick="clearFilters('${mode}')">✕ Limpiar filtros</button>
-    </div>` : '');
+    </div>`;
 
   const groupsHtml = groups.map(([field, label]) => {
     const values = uniq(field);
@@ -2029,6 +2029,7 @@ const cNum  = (v, cls='num') => ({ v: fmt(v), cls });
 const cPct  = v => ({ v: `${fmtPct(v)}%`, cls: `num ${semaforo(v).replace('kpi-','pct-')}` });
 const cDelta = v => ({ v: `${v>=0?'+':''}${fmtPct(v)} pp`, cls: `num ${v>=0?'delta-pos':'delta-neg'}` });
 const trunc = (s, n=40) => (s||'').length > n ? s.substring(0,n)+'…' : (s||'');
+const esc   = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 // ── DESGLOSE INTERACTIVO ───────────────────────────────────────
 const DD_GROUPS = [
@@ -2404,34 +2405,80 @@ function renderTables(year, data) {
 }
 
 function renderComparativeTable(d25, d26) {
-  const agg25 = toIndex(aggregateBy(d25, 'marca','familia','producto'), 'marca'); // keys by key string
-  const make25 = toIndexByKey(aggregateBy(d25, 'marca','familia','producto'));
-  const make26 = toIndexByKey(aggregateBy(d26, 'marca','familia','producto'));
-  const allKeys = [...new Set([...Object.keys(make25), ...Object.keys(make26)])];
+  // Indexar por código (clave más fiable para cruzar años)
+  const idx25 = {};
+  for (const r of d25) { const k = r.codigo||r.producto; if (k) idx25[k] = r; }
+  const idx26 = {};
+  for (const r of d26) { const k = r.codigo||r.producto; if (k) idx26[k] = r; }
+  const allCodes = [...new Set([...Object.keys(idx25), ...Object.keys(idx26)])];
 
-  const rows = allKeys.map(k => {
-    const r25 = make25[k] || {};
-    const r26 = make26[k] || {};
-    const [marca='', familia='', producto=''] = k.split('\x00');
-    const dU = (r26.exact_unid||0) - (r25.exact_unid||0);
-    const dP = (r26.exact_peso||0) - (r25.exact_peso||0);
-    return { marca, familia, producto, r25, r26, dU, dP };
-  }).sort((a,b) => a.dU - b.dU); // peor empeoramiento primero
+  // Para cada código: calcular row comparativa
+  const rows = allCodes.map(cod => {
+    const a = idx25[cod] || {};
+    const b = idx26[cod] || {};
+    const ref = Object.keys(a).length ? a : b;
+    return {
+      cod,
+      hiper:    ref.perfamilia || '—',
+      familia:  ref.familia    || '—',
+      desc:     ref.producto   || cod,
+      us25: a.unidades_sistema ?? null,
+      us26: b.unidades_sistema ?? null,
+      du25: a.dif_unidades     ?? null,
+      du26: b.dif_unidades     ?? null,
+      dp25: a.dif_peso         ?? null,
+      dp26: b.dif_peso         ?? null,
+      dDelta: (b.dif_peso||0) - (a.dif_peso||0),  // mejora negativa = mejoró
+    };
+  }).sort((a, b) => {
+    // Ordenar: primero los que empeoraron más (delta positivo = más negativo en 26)
+    const ap = Math.min(a.dp25||0, a.dp26||0);
+    const bp = Math.min(b.dp25||0, b.dp26||0);
+    return ap - bp;
+  });
 
-  buildTable('table-comparative',
-    ['Marca','Familia','Descripcion',
-     'STOCK SISTEMA 25','STOCK SISTEMA 26','DIFERENCIA 25','DIFERENCIA 26',
-     'VALOR SISTEMA $ 25','VALOR SISTEMA $ 26',
-     '% Exact Unid 25','% Exact Unid 26','Δ Exact Unid',
-     '% Exact Peso 25','% Exact Peso 26','Δ Exact Peso'],
-    rows.map(r => [
-      trunc(r.marca,20), trunc(r.familia,20), trunc(r.producto,35),
-      cNum(r.r25.us||0), cNum(r.r26.us||0),
-      cNum(r.r25.du||0), cNum(r.r26.du||0),
-      cNum(r.r25.ps||0), cNum(r.r26.ps||0),
-      cPct(r.r25.exact_unid||0), cPct(r.r26.exact_unid||0), cDelta(r.dU),
-      cPct(r.r25.exact_peso||0), cPct(r.r26.exact_peso||0), cDelta(r.dP),
-    ]));
+  const numCell = (v, isMoney) => {
+    if (v === null) return `<td class="num comp-null">—</td>`;
+    const cls = v < 0 ? 'comp-neg' : v > 0 ? 'comp-pos' : '';
+    const txt = isMoney ? fmtMoney(v) : (v >= 0 ? '+' : '') + fmt(v);
+    return `<td class="num ${cls}">${txt}</td>`;
+  };
+  const deltaCell = v => {
+    if (!Number.isFinite(v) || v === 0) return `<td class="num comp-null">—</td>`;
+    const cls = v < 0 ? 'comp-mejor' : 'comp-peor';
+    return `<td class="num ${cls}">${v >= 0 ? '+' : ''}${fmtMoney(v)}</td>`;
+  };
+
+  const trows = rows.map(r => `<tr>
+    <td class="comp-td-hiper" title="${esc(r.hiper)}">${trunc(r.hiper,22)}</td>
+    <td title="${esc(r.familia)}">${trunc(r.familia,22)}</td>
+    <td class="mono-sm">${r.cod}</td>
+    <td title="${esc(r.desc)}">${trunc(r.desc,40)}</td>
+    ${r.us25===null?'<td class="num comp-null">—</td>':`<td class="num">${fmt(r.us25)}</td>`}
+    ${r.us26===null?'<td class="num comp-null">—</td>':`<td class="num">${fmt(r.us26)}</td>`}
+    ${numCell(r.du25,false)}${numCell(r.du26,false)}
+    ${numCell(r.dp25,true)} ${numCell(r.dp26,true)}
+    ${deltaCell(r.dDelta)}
+  </tr>`).join('');
+
+  const table = document.getElementById('table-comparative');
+  if (!table) return;
+  table.className = 'comp-table';
+  table.innerHTML = `
+    <thead><tr>
+      <th onclick="sortTable('table-comparative',0)">HIPERFAMILIA</th>
+      <th onclick="sortTable('table-comparative',1)">FAMILIA</th>
+      <th onclick="sortTable('table-comparative',2)">CÓDIGO</th>
+      <th onclick="sortTable('table-comparative',3)">DESCRIPCIÓN</th>
+      <th class="num" onclick="sortTable('table-comparative',4)">STOCK SISTEMA 25</th>
+      <th class="num" onclick="sortTable('table-comparative',5)">STOCK SISTEMA 26</th>
+      <th class="num" onclick="sortTable('table-comparative',6)">DIFERENCIA 25</th>
+      <th class="num" onclick="sortTable('table-comparative',7)">DIFERENCIA 26</th>
+      <th class="num" onclick="sortTable('table-comparative',8)">DIFERENCIA $ 25</th>
+      <th class="num" onclick="sortTable('table-comparative',9)">DIFERENCIA $ 26</th>
+      <th class="num" onclick="sortTable('table-comparative',10)">∆ DIFERENCIA $</th>
+    </tr></thead>
+    <tbody>${trows}</tbody>`;
 }
 
 function toIndexByKey(arr) {
@@ -2479,31 +2526,166 @@ function renderInsights(year, data) {
 }
 
 function renderInsightsComp(d25, d26) {
-  const el  = document.getElementById('insights-comparative');
+  const el = document.getElementById('insights-comparative');
+  if (!el) return;
+
+  if (!d25.length && !d26.length) {
+    el.innerHTML = '<div class="insight-item">ℹ️ Carga datos de ambos años para ver el análisis comparativo.</div>';
+    return;
+  }
+  if (!d25.length) {
+    el.innerHTML = '<div class="insight-item">ℹ️ No hay datos de 2025. Carga el archivo 2025 para ver la comparación completa.</div>';
+    return;
+  }
+  if (!d26.length) {
+    el.innerHTML = '<div class="insight-item">ℹ️ No hay datos de 2026. Carga el archivo 2026 para ver la comparación completa.</div>';
+    return;
+  }
+
   const k25 = calcKPIs(d25);
   const k26 = calcKPIs(d26);
-  const dU  = k26.exact_unid - k25.exact_unid;
+  const m25 = calcMonetarySummary(d25);
+  const m26 = calcMonetarySummary(d26);
+  const dExact = k26.exact_unid - k25.exact_unid;
+  const dDisp  = m26.dispersion - m25.dispersion;
 
-  const idx25 = toIndex(aggregateBy(d25, 'familia'), 'familia');
-  const idx26 = toIndex(aggregateBy(d26, 'familia'), 'familia');
-  const allFam = [...new Set([...Object.keys(idx25), ...Object.keys(idx26)])];
+  // Índices por familia y hiperfamilia
+  const fam25 = toIndex(aggregateBy(d25, 'familia'), 'familia');
+  const fam26 = toIndex(aggregateBy(d26, 'familia'), 'familia');
+  const hiper25 = toIndex(aggregateBy(d25, 'perfamilia'), 'perfamilia');
+  const hiper26 = toIndex(aggregateBy(d26, 'perfamilia'), 'perfamilia');
+  const allFam = [...new Set([...Object.keys(fam25), ...Object.keys(fam26)])].filter(f => f && f !== '—');
 
-  const deltas = allFam.map(f => ({
+  // Mejoras: familias donde dispersión $ bajó en 2026
+  const famDeltas = allFam.map(f => ({
     f,
-    dU: (idx26[f]?.exact_unid||0) - (idx25[f]?.exact_unid||0)
-  })).sort((a,b) => a.dU - b.dU);
+    adp25: fam25[f]?.adp || 0,
+    adp26: fam26[f]?.adp || 0,
+    delta: (fam26[f]?.adp||0) - (fam25[f]?.adp||0),
+  })).filter(d => d.adp25 > 0 || d.adp26 > 0);
 
-  const worse  = deltas.filter(d => d.dU < -2).slice(0,3);
-  const better = [...deltas].reverse().filter(d => d.dU > 2).slice(0,3);
-  const items  = [];
+  const mejoras  = [...famDeltas].sort((a,b) => a.delta - b.delta).filter(d => d.delta < 0).slice(0,5);
+  const empeora  = [...famDeltas].sort((a,b) => b.delta - a.delta).filter(d => d.delta > 0).slice(0,5);
 
-  items.push(`Exactitud unidades: <strong>${fmtPct(k25.exact_unid)}%</strong> (2025) → <strong>${fmtPct(k26.exact_unid)}%</strong> (2026) (<span class="${dU>=0?'delta-pos':'delta-neg'}">${dU>=0?'+':''}${fmtPct(dU)} pp</span>).`);
-  if (worse.length)  items.push(`Familias que <strong>empeoraron</strong>: ${worse.map(d=>`${d.f} (${fmtPct(d.dU)} pp)`).join(', ')}.`);
-  if (better.length) items.push(`Familias que <strong>mejoraron</strong>: ${better.map(d=>`${d.f} (+${fmtPct(d.dU)} pp)`).join(', ')} — replicar método.`);
-  if (d25.length === 0) items.push('ℹ️ No hay datos de 2025. Carga archivos 2025 para la comparación completa.');
-  if (d26.length === 0) items.push('ℹ️ No hay datos de 2026. Carga archivos 2026 para la comparación completa.');
+  // Productos con diferencia negativa en AMBOS años (problema repetido)
+  const idx25p = {}; for (const r of d25) { const k = r.codigo||r.producto; if(k) idx25p[k] = r; }
+  const idx26p = {}; for (const r of d26) { const k = r.codigo||r.producto; if(k) idx26p[k] = r; }
+  const repetidas = Object.keys(idx25p).filter(cod => {
+    const a = idx25p[cod]; const b = idx26p[cod];
+    return b && (a.dif_peso||0) < 0 && (b.dif_peso||0) < 0;
+  }).map(cod => ({
+    cod,
+    desc: idx25p[cod].producto || cod,
+    dp25: idx25p[cod].dif_peso||0,
+    dp26: idx26p[cod].dif_peso||0,
+    familia: idx25p[cod].familia||'—',
+  })).sort((a,b) => a.dp26 - b.dp26).slice(0,8);
 
-  el.innerHTML = items.map(t => `<div class="insight-item">${t}</div>`).join('');
+  // Productos que se resolvieron (faltante 2025, exacto o sobrante 2026)
+  const resueltos = Object.keys(idx25p).filter(cod => {
+    const a = idx25p[cod]; const b = idx26p[cod];
+    return b && (a.dif_peso||0) < 0 && (b.dif_peso||0) >= 0;
+  }).length;
+
+  // Nuevos problemas (OK en 2025, faltante en 2026)
+  const nuevosProb = Object.keys(idx26p).filter(cod => {
+    const a = idx25p[cod]; const b = idx26p[cod];
+    return (b.dif_peso||0) < 0 && (!a || (a.dif_peso||0) >= 0);
+  }).length;
+
+  const signo = v => v >= 0 ? `<span class="comp-pos">+${fmtMoney(v)}</span>` : `<span class="comp-neg">${fmtMoney(v)}</span>`;
+  const signoN = v => v >= 0 ? `<span class="comp-pos">+${fmt(v)}</span>` : `<span class="comp-neg">${fmt(v)}</span>`;
+
+  el.innerHTML = `
+  <div class="comp-analysis">
+
+    <!-- RESUMEN EJECUTIVO -->
+    <div class="comp-analysis-section comp-resumen-section">
+      <div class="comp-analysis-title">📋 Resumen Comparativo 2025 → 2026</div>
+      <div class="comp-resumen-grid">
+        <div class="comp-resumen-card">
+          <div class="comp-resumen-label">Exactitud inventario</div>
+          <div class="comp-resumen-vals">
+            <span class="comp-yr25">${fmtPct(k25.exact_unid)}%</span>
+            <span class="comp-arrow">→</span>
+            <span class="comp-yr26">${fmtPct(k26.exact_unid)}%</span>
+            <span class="${dExact>=0?'comp-mejor':'comp-peor'}">(${dExact>=0?'+':''}${fmtPct(dExact)} pp)</span>
+          </div>
+        </div>
+        <div class="comp-resumen-card">
+          <div class="comp-resumen-label">Dispersión total $</div>
+          <div class="comp-resumen-vals">
+            <span class="comp-yr25">${fmtMoney(m25.dispersion)}</span>
+            <span class="comp-arrow">→</span>
+            <span class="comp-yr26">${fmtMoney(m26.dispersion)}</span>
+            <span class="${dDisp<=0?'comp-mejor':'comp-peor'}">(${dDisp>=0?'+':''}${fmtMoney(dDisp)})</span>
+          </div>
+        </div>
+        <div class="comp-resumen-card">
+          <div class="comp-resumen-label">Faltantes resueltos</div>
+          <div class="comp-resumen-vals">
+            <span class="comp-mejor" style="font-size:1.2em;font-weight:700">${fmt(resueltos)}</span>
+            <span style="color:var(--muted);font-size:12px">productos corregidos</span>
+          </div>
+        </div>
+        <div class="comp-resumen-card">
+          <div class="comp-resumen-label">Nuevos problemas 2026</div>
+          <div class="comp-resumen-vals">
+            <span class="${nuevosProb>0?'comp-peor':'comp-mejor'}" style="font-size:1.2em;font-weight:700">${fmt(nuevosProb)}</span>
+            <span style="color:var(--muted);font-size:12px">productos con faltante nuevo</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LO QUE MEJORÓ -->
+    ${mejoras.length ? `
+    <div class="comp-analysis-section comp-mejora-section">
+      <div class="comp-analysis-title">✅ ¿Qué mejoró de 2025 a 2026? — Familias con menos dispersión</div>
+      <table class="comp-mini-table">
+        <thead><tr><th>FAMILIA</th><th class="num">DIFERENCIA $ 2025</th><th class="num">DIFERENCIA $ 2026</th><th class="num">MEJORA $</th></tr></thead>
+        <tbody>${mejoras.map(d=>`<tr>
+          <td>${d.f}</td>
+          <td class="num comp-neg">${fmtMoney(d.adp25)}</td>
+          <td class="num ${d.adp26>0?'comp-neg':'comp-null'}">${d.adp26>0?fmtMoney(d.adp26):'Sin diferencias'}</td>
+          <td class="num comp-mejor">${fmtMoney(Math.abs(d.delta))} menos</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- LO QUE EMPEORÓ -->
+    ${empeora.length ? `
+    <div class="comp-analysis-section comp-empeora-section">
+      <div class="comp-analysis-title">⚠️ ¿Qué empeoró de 2025 a 2026? — Familias con más dispersión</div>
+      <table class="comp-mini-table">
+        <thead><tr><th>FAMILIA</th><th class="num">DIFERENCIA $ 2025</th><th class="num">DIFERENCIA $ 2026</th><th class="num">EMPEORAMIENTO $</th></tr></thead>
+        <tbody>${empeora.map(d=>`<tr>
+          <td>${d.f}</td>
+          <td class="num ${d.adp25>0?'comp-neg':'comp-null'}">${d.adp25>0?fmtMoney(d.adp25):'Sin diferencias'}</td>
+          <td class="num comp-neg">${fmtMoney(d.adp26)}</td>
+          <td class="num comp-peor">+${fmtMoney(d.delta)} más</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- DIFERENCIAS REPETIDAS -->
+    ${repetidas.length ? `
+    <div class="comp-analysis-section comp-repetidas-section">
+      <div class="comp-analysis-title">🔄 Diferencias repetidas — Faltantes en 2025 y 2026 (mismo problema)</div>
+      <div class="comp-repetidas-nota">Estos productos tuvieron faltantes en ambos años. Son candidatos a revisión de proceso o hurto sistemático.</div>
+      <table class="comp-mini-table">
+        <thead><tr><th>CÓDIGO</th><th>DESCRIPCIÓN</th><th>FAMILIA</th><th class="num">DIFERENCIA $ 2025</th><th class="num">DIFERENCIA $ 2026</th></tr></thead>
+        <tbody>${repetidas.map(r=>`<tr>
+          <td class="mono-sm">${r.cod}</td>
+          <td title="${esc(r.desc)}">${trunc(r.desc,38)}</td>
+          <td>${r.familia}</td>
+          <td class="num comp-neg">${fmtMoney(r.dp25)}</td>
+          <td class="num comp-neg">${fmtMoney(r.dp26)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}
+
+  </div>`;
 }
 
 // ── ORDENAMIENTO DE TABLAS ─────────────────────────────────────
@@ -2680,11 +2862,127 @@ function generateReport(mode) {
     '2026': 'Análisis Inventario 2026',
     comparative: 'Comparativo 2025 vs 2026'
   };
+
+  // ── Modo COMPARATIVO: captura completa del estado en vivo ────────
+  if (mode === 'comparative') {
+    const kpiHtml      = document.getElementById('comp-kpis')?.innerHTML || '';
+    const kpiCompHtml  = document.getElementById('kpi-comparative')?.innerHTML || '';
+    const analysisHtml = document.getElementById('insights-comparative')?.innerHTML || '';
+    const catHtml      = document.getElementById('comp-categoria')?.innerHTML || '';
+    const tableEl      = document.getElementById('table-comparative');
+    const tableHtml    = (tableEl && tableEl.rows.length > 1) ? tableEl.outerHTML : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<title>Comparativo 2025 vs 2026 · El Manzano</title>
+<style>
+  body{font-family:system-ui,sans-serif;color:#0f172a;margin:28px 36px;font-size:13px}
+  h1{color:#1A56DB;border-bottom:3px solid #1A56DB;padding-bottom:8px;margin-bottom:4px}
+  h2{color:#1e293b;font-size:15px;margin:22px 0 8px;border-left:4px solid #1A56DB;padding-left:10px}
+  h3{color:#334155;font-size:13px;margin:14px 0 6px}
+  p.sub{color:#64748b;font-size:12px;margin-bottom:18px}
+  /* KPI cards */
+  .kpi-grid,.comp-kpi-columns{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+  .kpi-card{border:1px solid #e2e8f0;border-left:4px solid #1A56DB;border-radius:8px;padding:10px 13px;min-width:140px}
+  .kpi-label{font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:3px}
+  .kpi-value{font-size:20px;font-weight:800;color:#0f172a}
+  .kpi-sub{font-size:11px;color:#64748b;margin-top:2px}
+  .kpi-verde .kpi-value{color:#16a34a}.kpi-verde{border-left-color:#16a34a}
+  .kpi-amarillo .kpi-value{color:#d97706}.kpi-amarillo{border-left-color:#d97706}
+  .kpi-rojo .kpi-value{color:#dc2626}.kpi-rojo{border-left-color:#dc2626}
+  .kpi-neutral .kpi-value{color:#1A56DB}
+  /* análisis comparativo */
+  .comp-analysis{display:flex;flex-direction:column;gap:16px;margin:14px 0}
+  .comp-analysis-section{border-radius:8px;padding:14px 16px;border:1px solid #e2e8f0}
+  .comp-resumen-section{background:#f0f7ff;border-color:#bfdbfe}
+  .comp-mejora-section{background:#f0fdf4;border-color:#bbf7d0}
+  .comp-empeora-section{background:#fff1f2;border-color:#fecdd3}
+  .comp-repetidas-section{background:#fffbeb;border-color:#fde68a}
+  .comp-analysis-title{font-weight:700;font-size:13px;margin-bottom:10px;color:#1e293b}
+  .comp-resumen-grid{display:flex;gap:12px;flex-wrap:wrap}
+  .comp-resumen-card{background:#fff;border:1px solid #e2e8f0;border-radius:7px;padding:10px 14px;min-width:160px}
+  .comp-resumen-label{font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:5px}
+  .comp-resumen-vals{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:13px;font-weight:600}
+  .comp-yr25{color:#64748b}.comp-yr26{color:#1A56DB;font-weight:700}
+  .comp-arrow{color:#94a3b8}
+  .comp-mejor{color:#16a34a;font-weight:700}.comp-peor{color:#dc2626;font-weight:700}
+  .comp-pos{color:#1A56DB;font-weight:700}.comp-neg{color:#dc2626;font-weight:700}
+  .comp-null{color:#94a3b8}
+  .comp-repetidas-nota{font-size:12px;color:#92400e;margin-bottom:8px;font-style:italic}
+  /* tablas */
+  table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:12px}
+  .comp-table th,.comp-mini-table th{background:#1A56DB;color:#fff;padding:6px 9px;text-align:left;
+    font-size:10px;font-weight:700;text-transform:uppercase;cursor:pointer;white-space:nowrap}
+  .comp-table th:hover,.comp-mini-table th:hover{background:#1d4ed8}
+  td{padding:5px 9px;border-bottom:1px solid #f1f5f9;white-space:nowrap}
+  tr:nth-child(even) td{background:#fafafa}
+  .num{text-align:right;font-family:monospace}
+  .mono-sm{font-family:monospace;font-size:11px}
+  .comp-td-hiper{font-size:10px;color:#64748b}
+  .comp-mejor td{background:#f0fdf4!important}.comp-peor-row td{background:#fff1f2!important}
+  .delta-pos{color:#16a34a;font-weight:600}.delta-neg{color:#dc2626;font-weight:600}
+  .gain-cell{color:#1A56DB;font-weight:700}.loss-cell{color:#dc2626;font-weight:700}
+  /* interactividad */
+  .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .table-block{margin-bottom:20px}
+  .table-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  footer{margin-top:36px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:8px}
+  @media print{.table-scroll{overflow:visible}}
+</style>
+<script>
+function sortTbl(tbl,ci){
+  const tb=tbl.querySelector('tbody');
+  const rows=[...tb.querySelectorAll('tr')];
+  const th=tbl.querySelectorAll('th')[ci];
+  const asc=th.dataset.asc!=='1';
+  tbl.querySelectorAll('th').forEach(t=>{t.dataset.asc='';t.textContent=t.textContent.replace(/ [▲▼]$/,'')});
+  th.dataset.asc=asc?'1':'0';
+  th.textContent+=(asc?' ▲':' ▼');
+  const ps=s=>{let v=s.replace(/[\$\s%+\.]/g,'').replace(',','.');return isNaN(v)?s:parseFloat(v);};
+  rows.sort((a,b)=>{const av=ps(a.cells[ci]?.textContent||''),bv=ps(b.cells[ci]?.textContent||'');
+    return typeof av==='number'&&typeof bv==='number'?(asc?av-bv:bv-av):(asc?String(av).localeCompare(String(bv)):String(bv).localeCompare(String(av)));});
+  rows.forEach(r=>tb.appendChild(r));
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  document.querySelectorAll('table').forEach(t=>{
+    t.querySelectorAll('th').forEach((th,i)=>{th.style.cursor='pointer';th.addEventListener('click',()=>sortTbl(t,i));});
+  });
+});
+<\/script>
+</head><body>
+<h1>Comparativo Inventario 2025 vs 2026</h1>
+<p class="sub">Ferretería Oviedo · El Manzano &nbsp;|&nbsp; Generado: ${new Date().toLocaleString('es-CL')}</p>
+
+<h2>📊 Indicadores Generales</h2>
+<div class="kpi-grid">${kpiCompHtml}</div>
+${kpiHtml ? `<div style="margin:14px 0">${kpiHtml}</div>` : ''}
+
+<h2>🔍 Análisis Comparativo</h2>
+${analysisHtml}
+
+${catHtml ? `<h2>📈 Comparativo por Categoría</h2><div>${catHtml}</div>` : ''}
+
+<h2>📋 Tabla Detalle por Producto</h2>
+<p style="font-size:12px;color:#64748b;margin-bottom:8px">Haz clic en los encabezados para ordenar. <strong style="color:#1A56DB">Azul</strong> = diferencia positiva (sobrante). <strong style="color:#dc2626">Rojo</strong> = diferencia negativa (faltante).</p>
+<div class="table-scroll">${tableHtml}</div>
+
+<footer>Generado con App Inventario El Manzano · Ferretería Oviedo &nbsp;|&nbsp; ${new Date().toLocaleDateString('es-CL')}</footer>
+</body></html>`;
+
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement('a'), { href:url, download:`Reporte_Comparativo_${today()}.html` });
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    showToast('Reporte comparativo descargado — ábrelo en el navegador.', 'ok');
+    return;
+  }
+
+  // ── Modos 2025 / 2026 ───────────────────────────────────────────
   const kpiHtml      = document.getElementById(`kpi-${mode}`)?.innerHTML || '';
   const monetaryHtml = document.getElementById(`kpi-monetary-${mode}`)?.innerHTML || '';
   const insightHtml  = document.getElementById(`insights-${mode}`)?.innerHTML || '';
 
-  // Incluir: Top diferencias, Pérdidas unid, Sobrantes unid, Pérdidas $, Sobrantes $
   const TABLE_IDS_POR_MODE = {
     '2025': [
       ['Top 20 · Mayor diferencia absoluta (Unidades)',    `top-unid-2025`],
@@ -2700,18 +2998,15 @@ function generateReport(mode) {
       ['Top 20 · Mayores Faltantes en $ (Peso)',          `top-perdida-peso-2026`],
       ['Top 20 · Mayores Sobrantes en $ (Peso)',          `top-sobrante-peso-2026`],
     ],
-    comparative: [['Tabla Comparativa 2025 vs 2026', 'table-comparative']],
   };
 
   let tablesHtml = '';
-  const tableList = TABLE_IDS_POR_MODE[mode] || [];
-  for (const [title, id] of tableList) {
+  for (const [title, id] of TABLE_IDS_POR_MODE[mode] || []) {
     const el = document.getElementById(id);
     if (el && el.rows.length > 1) {
       tablesHtml += `<h3 style="margin:20px 0 8px;font-size:14px">${title}</h3>${el.outerHTML}`;
     }
   }
-  // Fallback para otros modos sin tabla específica
   if (!tablesHtml) {
     const view = document.getElementById(`view-${mode}`);
     if (view) {
