@@ -4232,6 +4232,7 @@ function renderAnalisisFinal() {
   // ── Top sobrantes y faltantes ──────────────────────────────────
   const topsEl = document.getElementById('final-tops-grid');
   if (topsEl) {
+    topsEl.style.cssText = 'display:flex;flex-direction:column;gap:24px;';
     const topFalt = [...data].filter(r=>r.dif_peso<0).sort((a,b)=>a.dif_peso-b.dif_peso).slice(0,15);
     const topSobr = [...data].filter(r=>r.dif_peso>0).sort((a,b)=>b.dif_peso-a.dif_peso).slice(0,15);
     const thTop = 'background:#1e40af;color:#fff;font-weight:700;white-space:nowrap';
