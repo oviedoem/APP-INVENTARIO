@@ -9,10 +9,10 @@
 ### PRIORIDAD 0 — Aislamiento absoluto
 
 ```
-TRABAJAR SOLO EN:   D:\ferreteria-oviedo\APP-INVENTARIO\
+TRABAJAR SOLO EN:   E:\APP-INVENTARIO\
 NUNCA TOCAR:        panel-admin.html · panel-cliente.html · panel-vendedor.html
-                    D:\ferreteria-oviedo\  (raíz del otro proyecto)
-                    D:\ferreteria-oviedo-github\
+                    E:\ferreteria-oviedo\  (raíz del otro proyecto)
+                    E:\ferreteria-oviedo-github\
 ```
 
 Este proyecto es INDEPENDIENTE del panel admin/cliente/vendedor.
@@ -44,7 +44,7 @@ Antes de terminar cualquier sesión donde se hayan modificado archivos:
 2. Actualizar `MEMORIA_PROYECTO.md` con los cambios de la sesión
 3. Ejecutar el sync a GitHub:
    ```
-   D:\ferreteria-oviedo\APP-INVENTARIO\ACTUALIZAR_GITHUB_APP_INVENTARIO.bat
+   E:\APP-INVENTARIO\ACTUALIZAR_GITHUB_APP_INVENTARIO.bat
    ```
 4. Confirmar el commit exitoso antes de cerrar
 
@@ -60,7 +60,7 @@ jerárquicamente hasta nivel de producto.
 
 **Directorio activo:**
 ```
-D:\ferreteria-oviedo\APP-INVENTARIO\
+E:\APP-INVENTARIO\
 ```
 
 **Archivos principales:**
@@ -312,6 +312,128 @@ exportRecountExcel()               // V4.1: Excel 2 hojas: Reconteo + Ranking_$
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### V7.23 — 2026-06-11 — Fix reporte comparativo: sin SVG, secciones siempre visibles
+
+**TOCO: `app.js` (bloque comparative de `generateReport`) + `index.html` (cache-bust v=7.23)**
+
+**Cambios app.js:**
+- `generateReport` modo `comparative`: reescritura del HTML generado
+  - Eliminado SVG bar chart (barras superpuestas por ROW_H insuficiente)
+  - Reemplazado con tabla simple: Familia | DIFERENCIA $ 2025 | DIFERENCIA $ 2026 | Variación $ | Resultado
+  - Eliminado `<details>/<summary>` (secciones expandibles = confusas para usuarios amateurs)
+  - Secciones ahora siempre visibles con `seccion()` helper (div con borde de color)
+  - Fix % absurdos: nueva función `pct(delta, base)` — cuando base=0 devuelve '—' en lugar de "18783600% más"
+  - KPI labels: "Dispersión $" → "Total DIFERENCIA $" (lenguaje de planilla)
+  - Tabla empeoraron: "Familia nueva" cuando adp25=0 en lugar de % absurdo
+  - Columna "∆ DIFERENCIA $" → "VARIACION $"
+  - Leyenda sort: "clic en encabezado para ordenar" (sin "▲▼" extra)
+- `topChart` renombrado a `topFam`
+- Eliminado: `maxV`, `BAR_W`, `ROW_H`, `LABEL_W`, `PAD`, `svgH`, `bar()`, `svgRows`, `svgChart`
+- Mantenido: misma lógica de datos, KPI cards, tabla 300 productos, sorting JS inline
+
+**Commit:** `ac7ee7d`
+
+---
+
+### V7.19 — 2026-06-11 — generateReport comparativo desde datos frescos
+
+**TOCO: `app.js` (bloque comparative de `generateReport`) + `index.html` (cache-bust)**
+
+**Cambios app.js:**
+- `generateReport` modo `comparative` (reescritura completa del bloque):
+  - Reemplaza captura DOM por `getFilteredDataComp()` → datos frescos en tiempo real, respeta filtros activos al momento de descarga
+  - KPI cards con 100% inline styles → email-safe, no requiere hoja de estilos externa
+  - SVG bar chart horizontal: top-10 familias por dispersión $ (gris=2025, azul/rojo=2026)
+  - Secciones `<details>/<summary>` expandibles: resumen ejecutivo, gráfico, mejoras, empeora, diferencias repetidas
+  - Tabla principal hasta 300 productos, colores inline, sorteable en navegador (JS inline)
+  - Indicador de filtros activos en cabecera del reporte
+
+**Commit:** `5d1d3a0`
+
+---
+
+### V7.18 — 2026-06-11 — Rediseño completo Tab Comparativo
+
+**TOCO: `app.js` (5 funciones + 1 init) + `style.css` (nuevas clases)**
+
+**Cambios app.js:**
+- `state.searchText`: agregado `comparative: ''`
+- `renderFilters`: búsqueda código/descripción habilitada para modo `comparative` (antes no tenía input)
+- `getFilteredDataComp`: aplica `state.searchText.comparative` para filtrar `d25`/`d26`
+- `renderComparativeTable` (reescritura): agrupación por `código` (más fiable que marca+familia+producto), columnas `DIFERENCIA`/`DIFERENCIA $` (nomenclatura ERP), colores `comp-pos` (azul) positivos / `comp-neg` (rojo) negativos, tabla `comp-table` con headers azules
+- `renderInsightsComp` (reescritura): 4 secciones — resumen ejecutivo (exactitud, dispersión, faltantes resueltos, nuevos problemas), familias que mejoraron, familias que empeoraron, productos con diferencias repetidas en ambos años
+- `generateReport` modo `comparative` (reescritura): HTML descargable con estado en vivo completo (KPIs+análisis+categoría+tabla), JS sorting interactivo, estilos autocontenidos
+- `esc()` helper para escape HTML (títulos y celdas)
+
+**Cambios style.css:**
+- `.comp-table th`: color `#1A56DB` (azul, antes `#1e293b` navy)
+- Nuevas clases: `comp-pos/neg/mejor/peor/null`, `comp-analysis-section` (4 variantes), `comp-mini-table`, `comp-resumen-grid/card`, `comp-yr25/yr26/arrow`
+
+**Archivos 2025 verificados:**
+- `ANALISIS_EL MANZANO-V2025....final.xlsx`: compatible 100% — 9163 prods, HIPERMALIA/FAMILIA/DIFERENCIA $ mapean via FIELD_ALIASES, Total Sistema $550.194.989
+
+**Commits:** `7051d2e` (app+css) · `f3d0028` (cache-bust v7.18)
+
+### V7.16 — 2026-06-11 — Fix consistencia Resumen RESULTADOS con informe oficial
+
+**TOCO: `app.js` (4 funciones) + `ANALISIS_EL MANZANO-V2026.xlsx` (TABLA_ANALISIS)**
+
+**Cambios app.js:**
+- `renderAnalisisFinal`: clasificación sobrantes/faltantes cambiada a `dif_peso` (sign $) — antes usaba `dif_unidades` → 1 producto en categoría incorrecta
+- `applyRowMapping`: `dif_valor_excel` (DIFERENCIA $) tiene prioridad sobre costo×unidades para `dif_peso`
+- `applyRowMapping`: `costo` prioriza catálogo (_costo) sobre columna Excel; `peso_sistema`/`peso_real` computados desde `unidades × costo` si columna ausente
+- `buildCatalogFromBodegas`: agrega hoja EXH (antes solo PEM+SEM)
+- `renderAnalisisFinal`: porcentajes redondeados a entero (`Math.round`) — igual al informe correo
+- Resumen compacto restaurado (`max-width:680px`), `font-weight:700` en filas clave
+
+**Cambios Excel:**
+- `TABLA_ANALISIS` reemplazada con datos del FINAL 8 junio (7 cols, incluye `DIFERENCIA $` oficial)
+- Todas las hojas de catálogo conservadas: SALA, PATIO, EXHIBICION, SEM, PEM, EXH, PROCESOS, BUSQUEDA
+
+**Resultado final (idéntico al correo):**
+- Total Sistema: $625.931.358 | Total Conteo: $623.851.200
+- Dif (+): $3.770.079 | 366 prods | 1% — Dif (-): $5.850.237 | 594 prods | 1%
+- Dispersión: $9.620.316 | 2%
+
+**NO TOCADO:** exportExcel, tabs, planos, comparativa 2025/2026, login, nav
+
+---
+
+### V7.15 — 2026-06-11 — Análisis Final: visual headers azul/blanco + Top15 full-width
+
+**TOCO: `renderAnalisisFinal()` — resEl.innerHTML, topsEl.style, topsEl.innerHTML + mkRows**
+
+- Resumen RESULTADOS: headers `#1e40af`/blanco/negrita, ancho 100%, valores neg=rojo/pos=azul, columna renombrada a "EN %"
+- Top 15: `topsEl.style = flex-column gap:24px` sobreescribe `charts-grid` (2 col → apilado full-width)
+- Top 15 expandido: 7 columnas (CÓDIGO, PRODUCTO, STOCK SIS., CONTEO, DIF. UNID., DIFERENCIA $, FAMILIA), truncación 52 chars, sin max-height
+- `mkRows`: white-space:nowrap, neg=rojo, pos=azul, familia en gris
+
+**AUDITORÍA INCONSISTENCIA (2026-06-11):**
+- Fila 9119 (Excel row 9120): producto 21205 "SOLDADURA 7018" tiene `STOCK SISTEMA = -0.1` (negativo). Causa raíz: dato incorrecto en ERP JustWeb, no en la app.
+- Diferencia app vs Excel RESULTADOS: ~$351 en faltantes, ~$108 en sobrantes → aceptable (0.006% del total)
+- App usa `dif_unidades` para clasificar faltantes/sobrantes en Resumen; Excel RESULTADOS usa sign(`DIFERENCIA $`). Pequeña discrepancia de 1-2 productos.
+- Advertencia "Fila 9119: valor negativo" = `peso_sistema < 0` (correcto, el dato viene malo del ERP)
+
+**NO TOCADO:** `calcKPIs`, `calcMonetarySummary`, `exportFinalExcel`, `buildTable` faltantes/hiper, botones descarga
+**node --check → OK ✓ | commits 4798a7f + 7c6ac46 | push main**
+
+---
+
+### V7.14 — 2026-06-10 — Fix datos pegados al limpiar + título Análisis Final
+
+**TOCO: `showWelcome()` en app.js**
+- Antes solo ocultaba `view-2025`, `view-2026`, `view-comparative`.
+- Al presionar "Limpiar" o "Limpiar todo" desde `view-final`, `view-mejoras`, `view-reconteo`, `view-2025v2` o `view-planos`, el DOM de esas vistas quedaba visible con datos en pantalla.
+- Fix: `showWelcome()` ahora oculta la lista completa de vistas: `['2025','2026','comparative','checklist','planos','2025v2','reconteo','mejoras','final']`.
+
+**TOCO: `index.html` L821**
+- Título en `view-final`: `"Análisis Final · Informe para el dueño"` → `"Análisis Final · Inventario Sucursal El Manzano"`.
+
+**NO TOCADO:** `clearAllApp()`, `clearAllData()`, `refreshView()`, ningún tab, flujo ni botón.
+**node --check → OK ✓ | commit 10fddc2 | push main**
+
+---
 
 ### V7.13 — 2026-06-01 — Migración a repo propio + GitHub Pages + fix persistencia
 
@@ -681,7 +803,7 @@ if (!tbody) return; // vista correlativo eliminada (V5.3) — evita TypeError qu
 
 **Impacto:** `window._patentesCargadas` ahora se llena correctamente al cargar el Excel → `renderCoverageZonas()`, `applyPatenteCellStates()` y `renderPlanoZonaProgress()` reciben datos reales → panel de avance y colores del plano funcionan automáticamente.
 
-**Regla persistente guardada en memoria:** NUNCA tocar `D:\ferreteria-oviedo\` (raíz). Solo `D:\ferreteria-oviedo\APP-INVENTARIO\`.
+**Regla persistente guardada en memoria:** NUNCA tocar `E:\ferreteria-oviedo\` (raíz). Solo `E:\APP-INVENTARIO\`.
 
 **NO tocado:** `getPlanoContados`, `_buildCoverageZonas`, `renderCoverageZonas`, `applyPatenteCellStates`, `renderPlanoZonaProgress`, `loadFiles`
 

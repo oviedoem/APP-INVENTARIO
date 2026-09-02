@@ -15,11 +15,12 @@ const state = {
   sortState: {},
   pendingLoad: null,
   filters: {
-    '2025':      { marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'', bodega:'' },
-    '2026':      { marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'', bodega:'' },
-    comparative: { marca:'', familia:'', perfamilia:'', zona:'', area:'' }
+    '2025':      { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'', patente:'', bodega:'' },
+    '2026':      { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'', patente:'', bodega:'' },
+    comparative: { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'' },
+    final:       { marca:'', familia:'', perfamilia:'', subfamilia:'' }
   },
-  searchText: { '2025': '', '2026': '' },
+  searchText: { '2025': '', '2026': '', comparative: '', final: '' },
   chartMode:  { '2025': 'unidades', '2026': 'unidades' },
   // Embudo jerárquico (nuevo V2)
   drilldown: {
@@ -100,7 +101,7 @@ function isBlankLike(v) {
   const s = v.toString().trim();
   if (!s) return true;
   const n = normalizeHeader(s).replace(/_/g, '');
-  return ['NA','N/A','SINDATO','SINDATOS','NULL','UNDEFINED','ERROR'].includes(n) ||
+  return ['NA','N/A','SINDATO','SINDATOS','NULL','UNDEFINED','ERROR','SINCLASIFICAR'].includes(n) ||
          s === '#N/A' || s === '#VALUE!' || s === '#REF!';
 }
 
@@ -322,13 +323,18 @@ function applyRowMapping(rawRow, mapping) {
   row.unidades_real    = parseNum(row.unidades_real);
   row.peso_sistema     = parseNum(row.peso_sistema);
   row.peso_real        = parseNum(row.peso_real);
-  row.costo            = parseNum(row.costo) || parseNum(rawRow._costo) || 0;
+  // Usar siempre costo real del catálogo (SEM/PEM/EXH) como fuente de verdad para valores $
+  row.costo            = parseNum(rawRow._costo) || parseNum(row.costo) || 0;
   row.dif_valor_excel  = parseNum(row.dif_valor);
   // Calcular diferencias
   row.dif_unidades     = row.unidades_real - row.unidades_sistema;
+  // peso_sistema / peso_real: leer columna si existe; si no, calcular desde costo del catálogo
+  if (!row.peso_sistema && row.costo) row.peso_sistema = row.unidades_sistema * row.costo;
+  if (!row.peso_real    && row.costo) row.peso_real    = row.unidades_real    * row.costo;
   const difValorPorCosto = row.costo ? row.dif_unidades * row.costo : 0;
   const difValorPorTotales = row.peso_real - row.peso_sistema;
-  row.dif_peso         = row.costo ? difValorPorCosto : (row.dif_valor_excel || difValorPorTotales);
+  // dif_valor_excel (DIFERENCIA $) tiene prioridad: es el valor oficial del ERP
+  row.dif_peso         = row.dif_valor_excel ? row.dif_valor_excel : (row.costo ? difValorPorCosto : difValorPorTotales);
   row.abs_dif_unidades = Math.abs(row.dif_unidades);
   row.abs_dif_peso     = Math.abs(row.dif_peso);
   // Normalizar strings
@@ -495,24 +501,32 @@ function buildLocationIndex(wb) {
 }
 
 // Construye índice de familia/marca desde hoja 'familia'
+// Guarda claves exactas Y normalizadas (normalizeSku) para cubrir diferencias de formato
 function buildFamiliaIndex(wb) {
-  const sheet = findSheetName(wb, ['familia']);
+  const sheet = findSheetName(wb, ['familia','FAMILIA','Familia']);
   if (!sheet) return {};
   try {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheet], { defval: '', raw: false });
     const index = {};
     for (const r of rows) {
-      const cod = cleanText(rowValueByAliases(r, ['Codigo','CODIGO','Codigo_Tecnico','CODIGO_TECNICO']));
+      const cod = cleanText(rowValueByAliases(r, ['Codigo','CODIGO','Codigo_Tecnico','CODIGO_TECNICO','cod','COD']));
       if (!cod) continue;
-      index[cod] = {
+      const entry = {
         marca:        cleanText(rowValueByAliases(r, ['Marca','MARCA'])),
-        hiperfamilia: cleanText(rowValueByAliases(r, ['Hiperfamilia','HIPERFAMILIA','HIPERMALIA'])),
+        hiperfamilia: cleanText(rowValueByAliases(r, ['Hiperfamilia','HIPERFAMILIA','HIPERMALIA','HiperFamilia'])),
         familia:      cleanText(rowValueByAliases(r, ['Familia','FAMILIA'])),
-        subfamilia:   cleanText(rowValueByAliases(r, ['SubFamilia','SUBFAMILIA','Subfamilia','SUB_FAMILIA'])),
+        subfamilia:   cleanText(rowValueByAliases(r, ['SubFamilia','SUBFAMILIA','Subfamilia','SUB_FAMILIA','Sub_Familia'])),
       };
+      index[cod] = entry;                              // clave exacta (trim)
+      const normCod = normalizeSku(cod);
+      if (normCod && normCod !== cod) index[normCod] = entry; // clave normalizada
+      // También guardar como string numérico puro por si Excel convierte a float
+      const numStr = String(parseFloat(cod));
+      if (numStr !== 'NaN' && numStr !== cod && numStr !== normCod) index[numStr] = entry;
     }
+    if (DEBUG) console.debug('[inventario] famIndex cargado', { sheet, filas: rows.length, claves: Object.keys(index).length });
     return index;
-  } catch { return {}; }
+  } catch(e) { console.warn('[inventario] buildFamiliaIndex error', e); return {}; }
 }
 
 // Construye índice de datos faltantes (marca/familia/hiperfamilia) desde hoja 'datos_faltantes'
@@ -576,6 +590,7 @@ function buildCatalogFromBodegas(wb) {
 
   readSheet('PEM');
   readSheet('SEM');
+  readSheet('EXH');
 
   // Asignar bodega a cada entrada del catálogo
   for (const cod of Object.keys(catalog)) {
@@ -684,10 +699,12 @@ async function readFileData(file) {
           const bodegaIndex  = Object.fromEntries(Object.entries(catalogIndex).filter(([,v]) => v.bodega).map(([k,v]) => [k, v.bodega]));
           const enriched = rows.map(r => {
             const cod = cleanText(rowValueByAliases(r, ['Codigo_tecnico','CODIGO','Codigo_Tecnico','Codigo','CODIGO_TECNICO']));
-            const loc = locIndex[cod] || {};
-            const fam = famIndex[cod] || {};
-            const mis = (missingIndex && cod && missingIndex[cod]) || {};
-            const cat = catalogIndex[cod] || {};
+            const codNorm = normalizeSku(cod);
+            const codNum  = String(parseFloat(cod));
+            const loc = locIndex[cod] || locIndex[codNorm] || {};
+            const fam = famIndex[cod] || famIndex[codNorm] || (codNum !== 'NaN' ? famIndex[codNum] : undefined) || {};
+            const mis = (missingIndex && cod && (missingIndex[cod] || missingIndex[codNorm])) || {};
+            const cat = catalogIndex[cod] || catalogIndex[codNorm] || {};
             return {
               ...r,
               _area:    cleanText(rowValueByAliases(r, ['AREA','ÁREA'])) || cleanText(loc.area),
@@ -1249,11 +1266,15 @@ function getFilteredData(year) {
     if (dd.hiperfamilia && r.perfamilia !== dd.hiperfamilia) return false;
     if (dd.familia      && r.familia    !== dd.familia)      return false;
     if (dd.marca        && r.marca      !== dd.marca)        return false;
-    // Filtros del drawer (solo ubicación)
-    if (f.bodega  && r.bodega  !== f.bodega)  return false;
-    if (f.zona    && r.zona    !== f.zona)    return false;
-    if (f.area    && r.area    !== f.area)    return false;
-    if (f.patente && r.patente !== f.patente) return false;
+    // Filtros del drawer
+    if (f.marca      && r.marca      !== f.marca)      return false;
+    if (f.familia    && r.familia    !== f.familia)    return false;
+    if (f.perfamilia && r.perfamilia !== f.perfamilia) return false;
+    if (f.subfamilia && r.subfamilia !== f.subfamilia) return false;
+    if (f.bodega     && r.bodega     !== f.bodega)     return false;
+    if (f.zona       && r.zona       !== f.zona)       return false;
+    if (f.area       && r.area       !== f.area)       return false;
+    if (f.patente    && r.patente    !== f.patente)    return false;
     if (q) {
       const hayProd = (r.producto || '').toLowerCase().includes(q);
       const hayCod  = (r.codigo   || '').toLowerCase().includes(q);
@@ -1271,7 +1292,7 @@ function setSearch(year, text) {
 }
 
 function clearFilters(mode) {
-  state.filters[mode] = { bodega:'', marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'' };
+  state.filters[mode] = { bodega:'', marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'', patente:'' };
   state.searchText[mode] = '';
   const inp = document.getElementById(`search-${mode}`);
   if (inp) inp.value = '';
@@ -1293,13 +1314,29 @@ function clearFilters(mode) {
 
 function getFilteredDataComp() {
   const f = state.filters.comparative;
+  const q = (state.searchText.comparative || '').toLowerCase().trim();
   const fn = r =>
     (!f.marca      || r.marca      === f.marca)      &&
     (!f.familia    || r.familia    === f.familia)    &&
     (!f.perfamilia || r.perfamilia === f.perfamilia) &&
+    (!f.subfamilia || r.subfamilia === f.subfamilia) &&
     (!f.zona       || r.zona       === f.zona)       &&
-    (!f.area       || r.area       === f.area);
+    (!f.area       || r.area       === f.area)       &&
+    (!q || (r.producto||'').toLowerCase().includes(q) || (r.codigo||'').toLowerCase().includes(q));
   return { d25: state.data2025.filter(fn), d26: state.data2026.filter(fn) };
+}
+
+function getFilteredDataFinal() {
+  const src = state.data2026?.length ? state.data2026 : state.data2025;
+  const f   = state.filters.final || {};
+  const q   = (state.searchText.final || '').toLowerCase().trim();
+  return src.filter(r =>
+    (!f.marca      || r.marca      === f.marca)      &&
+    (!f.familia    || r.familia    === f.familia)    &&
+    (!f.perfamilia || r.perfamilia === f.perfamilia) &&
+    (!f.subfamilia || r.subfamilia === f.subfamilia) &&
+    (!q || (r.producto||'').toLowerCase().includes(q) || (r.codigo||'').toLowerCase().includes(q))
+  );
 }
 
 // ── KPIs ───────────────────────────────────────────────────────
@@ -1716,20 +1753,21 @@ function renderMonetaryKPIs(year, data) {
 function renderFilters(mode) {
   const data = mode === 'comparative'
     ? [...state.data2025, ...state.data2026]
+    : mode === 'final'
+    ? (state.data2026?.length ? state.data2026 : state.data2025)
     : (mode === '2025' ? state.data2025 : state.data2026);
 
   const uniq = field => [...new Set(data.map(r => r[field]).filter(Boolean))].sort();
-  const f    = state.filters[mode];
+  const f    = state.filters[mode] || {};
   const q    = state.searchText[mode] || '';
 
-  // Modos year: solo filtros de ubicación (embudo maneja la jerarquía)
-  const groups = mode === 'comparative'
-    ? [['perfamilia','Hiperfamilia'],['marca','Marca'],['familia','Familia'],['zona','Zona'],['area','Área']]
-    : [['zona','Zona'],['area','Área'],['patente','Patente'],['bodega','Bodega EM']];
+  const groups = (mode === 'comparative' || mode === 'final')
+    ? [['perfamilia','Hiperfamilia'],['marca','Marca'],['familia','Familia'],['subfamilia','Subfamilia']]
+    : [['perfamilia','Hiperfamilia'],['marca','Marca'],['familia','Familia'],['subfamilia','Subfamilia'],['zona','Zona'],['area','Área'],['patente','Patente'],['bodega','Bodega EM']];
 
   const anyActive = groups.some(([field]) => f[field]) || q;
 
-  const searchRow = mode !== 'comparative' ? `
+  const searchRow = `
     <div class="seg-search-row">
       <span class="seg-search-icon">🔍</span>
       <input class="seg-search-input" id="search-${mode}" type="text"
@@ -1737,9 +1775,7 @@ function renderFilters(mode) {
              value="${q.replace(/"/g,'&quot;')}"
              oninput="setSearch('${mode}',this.value)">
       ${anyActive ? `<button class="btn btn-xs seg-clear-btn" onclick="clearFilters('${mode}')">✕ Limpiar</button>` : ''}
-    </div>` : (anyActive ? `<div class="seg-search-row" style="justify-content:flex-end">
-      <button class="btn btn-xs seg-clear-btn" onclick="clearFilters('${mode}')">✕ Limpiar filtros</button>
-    </div>` : '');
+    </div>`;
 
   const groupsHtml = groups.map(([field, label]) => {
     const values = uniq(field);
@@ -2023,6 +2059,7 @@ const cNum  = (v, cls='num') => ({ v: fmt(v), cls });
 const cPct  = v => ({ v: `${fmtPct(v)}%`, cls: `num ${semaforo(v).replace('kpi-','pct-')}` });
 const cDelta = v => ({ v: `${v>=0?'+':''}${fmtPct(v)} pp`, cls: `num ${v>=0?'delta-pos':'delta-neg'}` });
 const trunc = (s, n=40) => (s||'').length > n ? s.substring(0,n)+'…' : (s||'');
+const esc   = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 // ── DESGLOSE INTERACTIVO ───────────────────────────────────────
 const DD_GROUPS = [
@@ -2398,34 +2435,80 @@ function renderTables(year, data) {
 }
 
 function renderComparativeTable(d25, d26) {
-  const agg25 = toIndex(aggregateBy(d25, 'marca','familia','producto'), 'marca'); // keys by key string
-  const make25 = toIndexByKey(aggregateBy(d25, 'marca','familia','producto'));
-  const make26 = toIndexByKey(aggregateBy(d26, 'marca','familia','producto'));
-  const allKeys = [...new Set([...Object.keys(make25), ...Object.keys(make26)])];
+  // Indexar por código (clave más fiable para cruzar años)
+  const idx25 = {};
+  for (const r of d25) { const k = r.codigo||r.producto; if (k) idx25[k] = r; }
+  const idx26 = {};
+  for (const r of d26) { const k = r.codigo||r.producto; if (k) idx26[k] = r; }
+  const allCodes = [...new Set([...Object.keys(idx25), ...Object.keys(idx26)])];
 
-  const rows = allKeys.map(k => {
-    const r25 = make25[k] || {};
-    const r26 = make26[k] || {};
-    const [marca='', familia='', producto=''] = k.split('\x00');
-    const dU = (r26.exact_unid||0) - (r25.exact_unid||0);
-    const dP = (r26.exact_peso||0) - (r25.exact_peso||0);
-    return { marca, familia, producto, r25, r26, dU, dP };
-  }).sort((a,b) => a.dU - b.dU); // peor empeoramiento primero
+  // Para cada código: calcular row comparativa
+  const rows = allCodes.map(cod => {
+    const a = idx25[cod] || {};
+    const b = idx26[cod] || {};
+    const ref = Object.keys(a).length ? a : b;
+    return {
+      cod,
+      hiper:    ref.perfamilia || '—',
+      familia:  ref.familia    || '—',
+      desc:     ref.producto   || cod,
+      us25: a.unidades_sistema ?? null,
+      us26: b.unidades_sistema ?? null,
+      du25: a.dif_unidades     ?? null,
+      du26: b.dif_unidades     ?? null,
+      dp25: a.dif_peso         ?? null,
+      dp26: b.dif_peso         ?? null,
+      dDelta: (b.dif_peso||0) - (a.dif_peso||0),  // mejora negativa = mejoró
+    };
+  }).sort((a, b) => {
+    // Ordenar: primero los que empeoraron más (delta positivo = más negativo en 26)
+    const ap = Math.min(a.dp25||0, a.dp26||0);
+    const bp = Math.min(b.dp25||0, b.dp26||0);
+    return ap - bp;
+  });
 
-  buildTable('table-comparative',
-    ['Marca','Familia','Descripcion',
-     'STOCK SISTEMA 25','STOCK SISTEMA 26','DIFERENCIA 25','DIFERENCIA 26',
-     'VALOR SISTEMA $ 25','VALOR SISTEMA $ 26',
-     '% Exact Unid 25','% Exact Unid 26','Δ Exact Unid',
-     '% Exact Peso 25','% Exact Peso 26','Δ Exact Peso'],
-    rows.map(r => [
-      trunc(r.marca,20), trunc(r.familia,20), trunc(r.producto,35),
-      cNum(r.r25.us||0), cNum(r.r26.us||0),
-      cNum(r.r25.du||0), cNum(r.r26.du||0),
-      cNum(r.r25.ps||0), cNum(r.r26.ps||0),
-      cPct(r.r25.exact_unid||0), cPct(r.r26.exact_unid||0), cDelta(r.dU),
-      cPct(r.r25.exact_peso||0), cPct(r.r26.exact_peso||0), cDelta(r.dP),
-    ]));
+  const numCell = (v, isMoney) => {
+    if (v === null) return `<td class="num comp-null">—</td>`;
+    const cls = v < 0 ? 'comp-neg' : v > 0 ? 'comp-pos' : '';
+    const txt = isMoney ? fmtMoney(v) : (v >= 0 ? '+' : '') + fmt(v);
+    return `<td class="num ${cls}">${txt}</td>`;
+  };
+  const deltaCell = v => {
+    if (!Number.isFinite(v) || v === 0) return `<td class="num comp-null">—</td>`;
+    const cls = v < 0 ? 'comp-mejor' : 'comp-peor';
+    return `<td class="num ${cls}">${v >= 0 ? '+' : ''}${fmtMoney(v)}</td>`;
+  };
+
+  const trows = rows.map(r => `<tr>
+    <td class="comp-td-hiper" title="${esc(r.hiper)}">${trunc(r.hiper,22)}</td>
+    <td title="${esc(r.familia)}">${trunc(r.familia,22)}</td>
+    <td class="mono-sm">${r.cod}</td>
+    <td title="${esc(r.desc)}">${trunc(r.desc,40)}</td>
+    ${r.us25===null?'<td class="num comp-null">—</td>':`<td class="num">${fmt(r.us25)}</td>`}
+    ${r.us26===null?'<td class="num comp-null">—</td>':`<td class="num">${fmt(r.us26)}</td>`}
+    ${numCell(r.du25,false)}${numCell(r.du26,false)}
+    ${numCell(r.dp25,true)} ${numCell(r.dp26,true)}
+    ${deltaCell(r.dDelta)}
+  </tr>`).join('');
+
+  const table = document.getElementById('table-comparative');
+  if (!table) return;
+  table.className = 'comp-table';
+  table.innerHTML = `
+    <thead><tr>
+      <th onclick="sortTable('table-comparative',0)">HIPERFAMILIA</th>
+      <th onclick="sortTable('table-comparative',1)">FAMILIA</th>
+      <th onclick="sortTable('table-comparative',2)">CÓDIGO</th>
+      <th onclick="sortTable('table-comparative',3)">DESCRIPCIÓN</th>
+      <th class="num" onclick="sortTable('table-comparative',4)">STOCK SISTEMA 25</th>
+      <th class="num" onclick="sortTable('table-comparative',5)">STOCK SISTEMA 26</th>
+      <th class="num" onclick="sortTable('table-comparative',6)">DIFERENCIA 25</th>
+      <th class="num" onclick="sortTable('table-comparative',7)">DIFERENCIA 26</th>
+      <th class="num" onclick="sortTable('table-comparative',8)">DIFERENCIA $ 25</th>
+      <th class="num" onclick="sortTable('table-comparative',9)">DIFERENCIA $ 26</th>
+      <th class="num" onclick="sortTable('table-comparative',10)">∆ DIFERENCIA $</th>
+    </tr></thead>
+    <tbody>${trows}</tbody>`;
 }
 
 function toIndexByKey(arr) {
@@ -2473,31 +2556,166 @@ function renderInsights(year, data) {
 }
 
 function renderInsightsComp(d25, d26) {
-  const el  = document.getElementById('insights-comparative');
+  const el = document.getElementById('insights-comparative');
+  if (!el) return;
+
+  if (!d25.length && !d26.length) {
+    el.innerHTML = '<div class="insight-item">ℹ️ Carga datos de ambos años para ver el análisis comparativo.</div>';
+    return;
+  }
+  if (!d25.length) {
+    el.innerHTML = '<div class="insight-item">ℹ️ No hay datos de 2025. Carga el archivo 2025 para ver la comparación completa.</div>';
+    return;
+  }
+  if (!d26.length) {
+    el.innerHTML = '<div class="insight-item">ℹ️ No hay datos de 2026. Carga el archivo 2026 para ver la comparación completa.</div>';
+    return;
+  }
+
   const k25 = calcKPIs(d25);
   const k26 = calcKPIs(d26);
-  const dU  = k26.exact_unid - k25.exact_unid;
+  const m25 = calcMonetarySummary(d25);
+  const m26 = calcMonetarySummary(d26);
+  const dExact = k26.exact_unid - k25.exact_unid;
+  const dDisp  = m26.dispersion - m25.dispersion;
 
-  const idx25 = toIndex(aggregateBy(d25, 'familia'), 'familia');
-  const idx26 = toIndex(aggregateBy(d26, 'familia'), 'familia');
-  const allFam = [...new Set([...Object.keys(idx25), ...Object.keys(idx26)])];
+  // Índices por familia y hiperfamilia
+  const fam25 = toIndex(aggregateBy(d25, 'familia'), 'familia');
+  const fam26 = toIndex(aggregateBy(d26, 'familia'), 'familia');
+  const hiper25 = toIndex(aggregateBy(d25, 'perfamilia'), 'perfamilia');
+  const hiper26 = toIndex(aggregateBy(d26, 'perfamilia'), 'perfamilia');
+  const allFam = [...new Set([...Object.keys(fam25), ...Object.keys(fam26)])].filter(f => f && f !== '—');
 
-  const deltas = allFam.map(f => ({
+  // Mejoras: familias donde dispersión $ bajó en 2026
+  const famDeltas = allFam.map(f => ({
     f,
-    dU: (idx26[f]?.exact_unid||0) - (idx25[f]?.exact_unid||0)
-  })).sort((a,b) => a.dU - b.dU);
+    adp25: fam25[f]?.adp || 0,
+    adp26: fam26[f]?.adp || 0,
+    delta: (fam26[f]?.adp||0) - (fam25[f]?.adp||0),
+  })).filter(d => d.adp25 > 0 || d.adp26 > 0);
 
-  const worse  = deltas.filter(d => d.dU < -2).slice(0,3);
-  const better = [...deltas].reverse().filter(d => d.dU > 2).slice(0,3);
-  const items  = [];
+  const mejoras  = [...famDeltas].sort((a,b) => a.delta - b.delta).filter(d => d.delta < 0).slice(0,5);
+  const empeora  = [...famDeltas].sort((a,b) => b.delta - a.delta).filter(d => d.delta > 0).slice(0,5);
 
-  items.push(`Exactitud unidades: <strong>${fmtPct(k25.exact_unid)}%</strong> (2025) → <strong>${fmtPct(k26.exact_unid)}%</strong> (2026) (<span class="${dU>=0?'delta-pos':'delta-neg'}">${dU>=0?'+':''}${fmtPct(dU)} pp</span>).`);
-  if (worse.length)  items.push(`Familias que <strong>empeoraron</strong>: ${worse.map(d=>`${d.f} (${fmtPct(d.dU)} pp)`).join(', ')}.`);
-  if (better.length) items.push(`Familias que <strong>mejoraron</strong>: ${better.map(d=>`${d.f} (+${fmtPct(d.dU)} pp)`).join(', ')} — replicar método.`);
-  if (d25.length === 0) items.push('ℹ️ No hay datos de 2025. Carga archivos 2025 para la comparación completa.');
-  if (d26.length === 0) items.push('ℹ️ No hay datos de 2026. Carga archivos 2026 para la comparación completa.');
+  // Productos con diferencia negativa en AMBOS años (problema repetido)
+  const idx25p = {}; for (const r of d25) { const k = r.codigo||r.producto; if(k) idx25p[k] = r; }
+  const idx26p = {}; for (const r of d26) { const k = r.codigo||r.producto; if(k) idx26p[k] = r; }
+  const repetidas = Object.keys(idx25p).filter(cod => {
+    const a = idx25p[cod]; const b = idx26p[cod];
+    return b && (a.dif_peso||0) < 0 && (b.dif_peso||0) < 0;
+  }).map(cod => ({
+    cod,
+    desc: idx25p[cod].producto || cod,
+    dp25: idx25p[cod].dif_peso||0,
+    dp26: idx26p[cod].dif_peso||0,
+    familia: idx25p[cod].familia||'—',
+  })).sort((a,b) => a.dp26 - b.dp26).slice(0,8);
 
-  el.innerHTML = items.map(t => `<div class="insight-item">${t}</div>`).join('');
+  // Productos que se resolvieron (faltante 2025, exacto o sobrante 2026)
+  const resueltos = Object.keys(idx25p).filter(cod => {
+    const a = idx25p[cod]; const b = idx26p[cod];
+    return b && (a.dif_peso||0) < 0 && (b.dif_peso||0) >= 0;
+  }).length;
+
+  // Nuevos problemas (OK en 2025, faltante en 2026)
+  const nuevosProb = Object.keys(idx26p).filter(cod => {
+    const a = idx25p[cod]; const b = idx26p[cod];
+    return (b.dif_peso||0) < 0 && (!a || (a.dif_peso||0) >= 0);
+  }).length;
+
+  const signo = v => v >= 0 ? `<span class="comp-pos">+${fmtMoney(v)}</span>` : `<span class="comp-neg">${fmtMoney(v)}</span>`;
+  const signoN = v => v >= 0 ? `<span class="comp-pos">+${fmt(v)}</span>` : `<span class="comp-neg">${fmt(v)}</span>`;
+
+  el.innerHTML = `
+  <div class="comp-analysis">
+
+    <!-- RESUMEN EJECUTIVO -->
+    <div class="comp-analysis-section comp-resumen-section">
+      <div class="comp-analysis-title">📋 Resumen Comparativo 2025 → 2026</div>
+      <div class="comp-resumen-grid">
+        <div class="comp-resumen-card">
+          <div class="comp-resumen-label">Exactitud inventario</div>
+          <div class="comp-resumen-vals">
+            <span class="comp-yr25">${fmtPct(k25.exact_unid)}%</span>
+            <span class="comp-arrow">→</span>
+            <span class="comp-yr26">${fmtPct(k26.exact_unid)}%</span>
+            <span class="${dExact>=0?'comp-mejor':'comp-peor'}">(${dExact>=0?'+':''}${fmtPct(dExact)} pp)</span>
+          </div>
+        </div>
+        <div class="comp-resumen-card">
+          <div class="comp-resumen-label">Dispersión total $</div>
+          <div class="comp-resumen-vals">
+            <span class="comp-yr25">${fmtMoney(m25.dispersion)}</span>
+            <span class="comp-arrow">→</span>
+            <span class="comp-yr26">${fmtMoney(m26.dispersion)}</span>
+            <span class="${dDisp<=0?'comp-mejor':'comp-peor'}">(${dDisp>=0?'+':''}${fmtMoney(dDisp)})</span>
+          </div>
+        </div>
+        <div class="comp-resumen-card">
+          <div class="comp-resumen-label">Faltantes resueltos</div>
+          <div class="comp-resumen-vals">
+            <span class="comp-mejor" style="font-size:1.2em;font-weight:700">${fmt(resueltos)}</span>
+            <span style="color:var(--muted);font-size:12px">productos corregidos</span>
+          </div>
+        </div>
+        <div class="comp-resumen-card">
+          <div class="comp-resumen-label">Nuevos problemas 2026</div>
+          <div class="comp-resumen-vals">
+            <span class="${nuevosProb>0?'comp-peor':'comp-mejor'}" style="font-size:1.2em;font-weight:700">${fmt(nuevosProb)}</span>
+            <span style="color:var(--muted);font-size:12px">productos con faltante nuevo</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LO QUE MEJORÓ -->
+    ${mejoras.length ? `
+    <div class="comp-analysis-section comp-mejora-section">
+      <div class="comp-analysis-title">✅ ¿Qué mejoró de 2025 a 2026? — Familias con menos dispersión</div>
+      <table class="comp-mini-table">
+        <thead><tr><th>FAMILIA</th><th class="num">DIFERENCIA $ 2025</th><th class="num">DIFERENCIA $ 2026</th><th class="num">MEJORA $</th></tr></thead>
+        <tbody>${mejoras.map(d=>`<tr>
+          <td>${d.f}</td>
+          <td class="num comp-neg">${fmtMoney(d.adp25)}</td>
+          <td class="num ${d.adp26>0?'comp-neg':'comp-null'}">${d.adp26>0?fmtMoney(d.adp26):'Sin diferencias'}</td>
+          <td class="num comp-mejor">${fmtMoney(Math.abs(d.delta))} menos</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- LO QUE EMPEORÓ -->
+    ${empeora.length ? `
+    <div class="comp-analysis-section comp-empeora-section">
+      <div class="comp-analysis-title">⚠️ ¿Qué empeoró de 2025 a 2026? — Familias con más dispersión</div>
+      <table class="comp-mini-table">
+        <thead><tr><th>FAMILIA</th><th class="num">DIFERENCIA $ 2025</th><th class="num">DIFERENCIA $ 2026</th><th class="num">EMPEORAMIENTO $</th></tr></thead>
+        <tbody>${empeora.map(d=>`<tr>
+          <td>${d.f}</td>
+          <td class="num ${d.adp25>0?'comp-neg':'comp-null'}">${d.adp25>0?fmtMoney(d.adp25):'Sin diferencias'}</td>
+          <td class="num comp-neg">${fmtMoney(d.adp26)}</td>
+          <td class="num comp-peor">+${fmtMoney(d.delta)} más</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- DIFERENCIAS REPETIDAS -->
+    ${repetidas.length ? `
+    <div class="comp-analysis-section comp-repetidas-section">
+      <div class="comp-analysis-title">🔄 Diferencias repetidas — Faltantes en 2025 y 2026 (mismo problema)</div>
+      <div class="comp-repetidas-nota">Estos productos tuvieron faltantes en ambos años. Son candidatos a revisión de proceso o hurto sistemático.</div>
+      <table class="comp-mini-table">
+        <thead><tr><th>CÓDIGO</th><th>DESCRIPCIÓN</th><th>FAMILIA</th><th class="num">DIFERENCIA $ 2025</th><th class="num">DIFERENCIA $ 2026</th></tr></thead>
+        <tbody>${repetidas.map(r=>`<tr>
+          <td class="mono-sm">${r.cod}</td>
+          <td title="${esc(r.desc)}">${trunc(r.desc,38)}</td>
+          <td>${r.familia}</td>
+          <td class="num comp-neg">${fmtMoney(r.dp25)}</td>
+          <td class="num comp-neg">${fmtMoney(r.dp26)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}
+
+  </div>`;
 }
 
 // ── ORDENAMIENTO DE TABLAS ─────────────────────────────────────
@@ -2674,11 +2892,304 @@ function generateReport(mode) {
     '2026': 'Análisis Inventario 2026',
     comparative: 'Comparativo 2025 vs 2026'
   };
+
+  // ── Modo COMPARATIVO: datos frescos en tiempo real ───────────────
+  if (mode === 'comparative') {
+    const { d25, d26 } = getFilteredDataComp();
+    if (!d25.length && !d26.length) {
+      showToast('Sin datos para el reporte. Carga ambos años primero.', 'error'); return;
+    }
+
+    const k25 = calcKPIs(d25), k26 = calcKPIs(d26);
+    const m25 = calcMonetarySummary(d25), m26 = calcMonetarySummary(d26);
+    const dExact  = k26.exact_unid - k25.exact_unid;
+    const dDisp   = m26.dispersion - m25.dispersion;
+
+    const fIdx25  = toIndex(aggregateBy(d25,'familia'),'familia');
+    const fIdx26  = toIndex(aggregateBy(d26,'familia'),'familia');
+    const allFam  = [...new Set([...Object.keys(fIdx25),...Object.keys(fIdx26)])].filter(f=>f&&f!=='—');
+
+    const famData = allFam.map(f => ({
+      f,
+      adp25: fIdx25[f]?.adp||0, adp26: fIdx26[f]?.adp||0,
+      du25:  fIdx25[f]?.du||0,  du26:  fIdx26[f]?.du||0,
+      delta: (fIdx26[f]?.adp||0)-(fIdx25[f]?.adp||0),
+    })).filter(d=>d.adp25>0||d.adp26>0);
+
+    const mejoras  = [...famData].sort((a,b)=>a.delta-b.delta).filter(d=>d.delta<0).slice(0,6);
+    const empeora  = [...famData].sort((a,b)=>b.delta-a.delta).filter(d=>d.delta>0).slice(0,6);
+    const topFam   = [...famData].sort((a,b)=>(b.adp25+b.adp26)-(a.adp25+a.adp26)).slice(0,10);
+
+    const pIdx25={}, pIdx26={};
+    for(const r of d25){const k=r.codigo||r.producto;if(k)pIdx25[k]=r;}
+    for(const r of d26){const k=r.codigo||r.producto;if(k)pIdx26[k]=r;}
+    const allCodes=[...new Set([...Object.keys(pIdx25),...Object.keys(pIdx26)])];
+
+    const repetidas = allCodes.filter(c=>(pIdx25[c]?.dif_peso||0)<0&&(pIdx26[c]?.dif_peso||0)<0)
+      .map(c=>({c,desc:(pIdx25[c]||pIdx26[c]).producto||c,
+                fam:(pIdx25[c]||pIdx26[c]).familia||'—',
+                dp25:pIdx25[c]?.dif_peso||0, dp26:pIdx26[c]?.dif_peso||0}))
+      .sort((a,b)=>a.dp26-b.dp26).slice(0,10);
+
+    const resueltos = allCodes.filter(c=>pIdx25[c]&&(pIdx25[c].dif_peso||0)<0&&(pIdx26[c]?.dif_peso||0)>=0).length;
+    const nuevosProb= allCodes.filter(c=>pIdx26[c]&&(pIdx26[c].dif_peso||0)<0&&(!pIdx25[c]||(pIdx25[c].dif_peso||0)>=0)).length;
+
+    const M   = v => '$ '+Math.round(v||0).toLocaleString('es-CL');
+    const P   = v => (+v||0).toFixed(1)+'%';
+    const N   = v => (v||0).toLocaleString('es-CL',{maximumFractionDigits:0});
+    const sgn = v => (v>=0?'+':'')+N(v);
+    const sgnM= v => (v>=0?'+ ':'')+M(v);
+    const sem = p => p>=95?'#16a34a':p>=85?'#d97706':'#dc2626';
+    const pct = (delta, base) => base>0 ? Math.round(Math.abs(delta)/base*100)+'%' : '—';
+
+    const S = {
+      th:  'background:#1A56DB;color:#fff;padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap;border:none',
+      thR: 'background:#1A56DB;color:#fff;padding:7px 10px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap;border:none',
+      td:  'padding:6px 10px;border-bottom:1px solid #f1f5f9;font-size:12px;white-space:nowrap',
+      tdR: 'padding:6px 10px;border-bottom:1px solid #f1f5f9;font-size:12px;white-space:nowrap;text-align:right;font-family:monospace',
+      tbl: 'width:100%;border-collapse:collapse;font-size:12px;margin:0',
+    };
+    const td  = (v,extra='') => `<td style="${S.td}${extra}">${v??'—'}</td>`;
+    const tdR = (v,c='',extra='') => `<td style="${S.tdR};color:${c||'#0f172a'}${extra}">${v??'—'}</td>`;
+    const th  = v => `<th style="${S.th}">${v}</th>`;
+    const thR = v => `<th style="${S.thR}">${v}</th>`;
+
+    const seccion = (titulo, colorBorde, colorFondo, colorTitulo, contenido) =>
+      `<div style="margin:0 0 16px 0;border:1px solid ${colorBorde};border-radius:8px;overflow:hidden">
+        <div style="background:${colorFondo};padding:10px 14px;font-weight:700;font-size:13px;color:${colorTitulo};border-bottom:1px solid ${colorBorde}">${titulo}</div>
+        <div>${contenido}</div>
+      </div>`;
+
+    const prodRows = allCodes.map(cod=>{
+      const a=pIdx25[cod]||{}, b=pIdx26[cod]||{};
+      const ref=Object.keys(a).length?a:b;
+      const dp25=a.dif_peso??null, dp26=b.dif_peso??null;
+      const delta=((b.dif_peso||0)-(a.dif_peso||0));
+      const rowBg = dp25!==null&&dp26!==null&&dp25<0&&dp26<0 ? 'background:#fff7ed' :
+                    dp26!==null&&dp26<0 ? 'background:#fff1f2' : '';
+      return {cod,ref,a,b,dp25,dp26,delta,rowBg};
+    }).sort((x,y)=>(x.dp26??0)-(y.dp26??0));
+
+    const prodTbodyRows = prodRows.slice(0,300).map(({cod,ref,a,b,dp25,dp26,delta,rowBg},idx)=>{
+      const bg = idx%2===0?'#fafafa':'#fff';
+      const rowStyle = rowBg ? rowBg : `background:${bg}`;
+      const nc = v => v===null?`<td style="${S.tdR};color:#cbd5e1">—</td>`
+        :`<td style="${S.tdR};color:${v<0?'#dc2626':v>0?'#1A56DB':'#64748b'};font-weight:${v!==0?700:400}">${v<0?'':v>0?'+':''}${M(v)}</td>`;
+      const nu = v => v===null?`<td style="${S.tdR};color:#cbd5e1">—</td>`
+        :`<td style="${S.tdR};color:${v<0?'#dc2626':v>0?'#1A56DB':'#64748b'}">${sgn(v)}</td>`;
+      return `<tr style="${rowStyle}">
+        <td style="${S.td};font-family:monospace;font-size:10px;color:#64748b">${cod}</td>
+        <td style="${S.td}" title="${esc(ref.producto||cod)}">${trunc(ref.producto||cod,42)}</td>
+        <td style="${S.td};font-size:10px;color:#64748b">${trunc(ref.familia||'—',20)}</td>
+        <td style="${S.tdR}">${a.unidades_sistema!=null?N(a.unidades_sistema):'—'}</td>
+        <td style="${S.tdR}">${b.unidades_sistema!=null?N(b.unidades_sistema):'—'}</td>
+        ${nu(a.dif_unidades??null)}${nu(b.dif_unidades??null)}
+        ${nc(dp25)}${nc(dp26)}
+        <td style="${S.tdR};color:${delta<0?'#16a34a':delta>0?'#dc2626':'#64748b'};font-weight:700">${delta!==0?(delta<0?'▼ ':'▲ ')+M(Math.abs(delta)):'—'}</td>
+      </tr>`;
+    }).join('');
+
+    const fecha = new Date().toLocaleString('es-CL');
+    const filtrosActivos = (() => {
+      const f=state.filters.comparative, q=state.searchText.comparative||'';
+      const parts=[...Object.entries(f).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`), ...(q?[`búsqueda: "${q}"`]:[])];
+      return parts.length ? `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:12px;font-size:11px">Filtros activos: ${parts.join(' · ')}</span>` : '<span style="color:#16a34a;font-size:11px">Sin filtros — datos completos</span>';
+    })();
+
+    const html = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Comparativo Inventario 2025 vs 2026 · El Manzano</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#0f172a;margin:0;padding:24px 32px;font-size:13px;background:#f8fafc}
+  #wrap{max-width:960px;margin:0 auto;background:#fff;border-radius:12px;padding:28px 32px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .sort-hint{font-size:11px;color:#94a3b8;font-style:italic}
+  table{border-collapse:collapse}
+  @media(max-width:680px){#wrap{padding:14px 10px}body{padding:8px}}
+  @media print{body{background:#fff;padding:0}#wrap{box-shadow:none;padding:12px}.no-print{display:none}}
+</style>
+<script>
+(function(){
+  function ps(s){var v=s.replace(/[\$\s%+▲▼]/g,'').replace(/\./g,'').replace(',','.');return isNaN(+v)?s:+v;}
+  function sortTbl(t,ci){
+    var tb=t.querySelector('tbody'),ths=t.querySelectorAll('th'),th=ths[ci];
+    var asc=th.dataset.s!=='1';
+    [].forEach.call(ths,function(h){h.dataset.s='';h.style.background='#1A56DB';
+      h.innerHTML=h.innerHTML.replace(/ [▲▼]$/,'');});
+    th.dataset.s=asc?'1':'0';th.style.background='#1d4ed8';
+    th.innerHTML+=(asc?' ▲':' ▼');
+    var rows=[].slice.call(tb.querySelectorAll('tr'));
+    rows.sort(function(a,b){
+      var av=ps(a.cells[ci]?a.cells[ci].textContent:''),bv=ps(b.cells[ci]?b.cells[ci].textContent:'');
+      return typeof av==='number'&&typeof bv==='number'?(asc?av-bv:bv-av):(asc?String(av).localeCompare(String(bv),'es'):String(bv).localeCompare(String(av),'es'));
+    });
+    rows.forEach(function(r){tb.appendChild(r);});
+  }
+  document.addEventListener('DOMContentLoaded',function(){
+    [].forEach.call(document.querySelectorAll('table[data-sort]'),function(t){
+      [].forEach.call(t.querySelectorAll('th'),function(th,i){
+        th.style.cursor='pointer';
+        th.addEventListener('click',function(){sortTbl(t,i);});
+      });
+    });
+  });
+})();
+<\/script>
+</head>
+<body><div id="wrap">
+
+<!-- CABECERA -->
+<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:20px;padding-bottom:16px;border-bottom:3px solid #1A56DB">
+  <div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#1A56DB;margin-bottom:4px">Ferretería Oviedo · El Manzano</div>
+    <h1 style="margin:0;font-size:22px;font-weight:900;color:#0f172a">Comparativo Inventario 2025 vs 2026</h1>
+    <div style="margin-top:5px;font-size:11px;color:#64748b">Generado: ${fecha} · ${filtrosActivos}</div>
+  </div>
+  <div style="background:#0f172a;color:#fff;border-radius:8px;padding:8px 14px;font-size:11px;text-align:right;line-height:1.7">
+    <div>Productos 2025: <strong>${N(d25.length)}</strong></div>
+    <div>Productos 2026: <strong>${N(d26.length)}</strong></div>
+  </div>
+</div>
+
+<!-- KPI CARDS -->
+<div style="margin-bottom:24px">
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;letter-spacing:.06em;margin-bottom:10px">Indicadores Clave</div>
+  <table cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:10px;margin:-10px">
+    <tr>
+      ${[
+        {lbl:'Exactitud 2025',          val:P(k25.exact_unid), sub:'% inventario correcto',                              c:sem(k25.exact_unid)},
+        {lbl:'Exactitud 2026',          val:P(k26.exact_unid), sub:`Cambio: ${dExact>=0?'+':''}${P(dExact)} pp`,         c:sem(k26.exact_unid)},
+        {lbl:'Total DIFERENCIA $ 2025', val:M(m25.dispersion), sub:'suma total de diferencias',                          c:'#d97706'},
+        {lbl:'Total DIFERENCIA $ 2026', val:M(m26.dispersion), sub:`${dDisp<=0?'Mejora':'Empeora'} ${M(Math.abs(dDisp))}`, c:dDisp<=0?'#16a34a':'#dc2626'},
+        {lbl:'Faltantes resueltos',     val:N(resueltos),      sub:'corregidos respecto a 2025',                         c:'#16a34a'},
+        {lbl:'Nuevos faltantes',        val:N(nuevosProb),     sub:'productos con faltante nuevo en 2026',               c:nuevosProb>0?'#dc2626':'#16a34a'},
+      ].map(({lbl,val,sub,c})=>`<td style="vertical-align:top">
+        <div style="border:1px solid #e2e8f0;border-top:4px solid ${c};border-radius:9px;padding:12px 15px;min-width:130px;background:#fff">
+          <div style="font-size:9px;text-transform:uppercase;font-weight:700;color:#64748b;letter-spacing:.05em;margin-bottom:5px">${lbl}</div>
+          <div style="font-size:19px;font-weight:900;color:${c};line-height:1">${val}</div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:4px">${sub}</div>
+        </div>
+      </td>`).join('')}
+    </tr>
+  </table>
+</div>
+
+<!-- ANÁLISIS POR SECCIONES -->
+<div style="margin-bottom:24px">
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;letter-spacing:.06em;margin-bottom:12px">Análisis Comparativo</div>
+
+  ${seccion('Resumen General — Resultados 2025 vs 2026', '#bfdbfe', '#eff6ff', '#1e40af',
+    `<table cellpadding="0" cellspacing="0" style="${S.tbl}">
+      <thead><tr><th style="${S.th}">Indicador</th><th style="${S.thR}">2025</th><th style="${S.thR}">2026</th><th style="${S.thR}">Cambio</th></tr></thead>
+      <tbody>
+        <tr><td style="${S.td}">Exactitud inventario (unidades)</td>${tdR(P(k25.exact_unid),sem(k25.exact_unid))}${tdR(P(k26.exact_unid),sem(k26.exact_unid))}${tdR((dExact>=0?'+ ':'- ')+P(Math.abs(dExact))+' pp',dExact>=0?'#16a34a':'#dc2626',';font-weight:700')}</tr>
+        <tr style="background:#fafafa"><td style="${S.td}">Total DIFERENCIA $ (suma diferencias absolutas)</td>${tdR(M(m25.dispersion),'#d97706')}${tdR(M(m26.dispersion),'#d97706')}${tdR(sgnM(dDisp),dDisp<=0?'#16a34a':'#dc2626',';font-weight:700')}</tr>
+        <tr><td style="${S.td}">Total $ Sistema</td>${tdR(M(m25.totalSistema))}${tdR(M(m26.totalSistema))}${tdR(sgnM(m26.totalSistema-m25.totalSistema),'#64748b')}</tr>
+        <tr style="background:#fafafa"><td style="${S.td}">Faltantes resueltos (problema en 2025 corregido en 2026)</td><td style="${S.tdR}"></td><td style="${S.tdR}"></td>${tdR(N(resueltos),'#16a34a',';font-weight:700')}</tr>
+        <tr><td style="${S.td}">Nuevos faltantes (sin problema en 2025, con faltante en 2026)</td><td style="${S.tdR}"></td><td style="${S.tdR}"></td>${tdR(N(nuevosProb),nuevosProb>0?'#dc2626':'#16a34a',';font-weight:700')}</tr>
+      </tbody>
+    </table>`
+  )}
+
+  ${topFam.length ? seccion(`Top ${topFam.length} Familias — DIFERENCIA $ 2025 vs 2026`, '#bfdbfe', '#f0f7ff', '#1e40af',
+    `<table data-sort style="${S.tbl}">
+      <thead><tr>${th('Familia')}${thR('DIFERENCIA $ 2025')}${thR('DIFERENCIA $ 2026')}${thR('Variación $')}${thR('Resultado')}</tr></thead>
+      <tbody>${topFam.map((d,i)=>{
+        const v=d.adp26-d.adp25;
+        return `<tr style="background:${i%2?'#fafafa':'#fff'}">
+          ${td('<strong>'+esc(d.f)+'</strong>')}
+          ${tdR(d.adp25>0?M(d.adp25):'—','#d97706')}
+          ${tdR(d.adp26>0?M(d.adp26):'—','#d97706')}
+          ${v===0?tdR('Sin cambio','#64748b'):tdR((v<0?'▼ ':'▲ ')+M(Math.abs(v)),v<0?'#16a34a':'#dc2626',';font-weight:700')}
+          <td style="${S.tdR};color:${v<0?'#16a34a':v>0?'#dc2626':'#64748b'};font-weight:700">${v<0?'Mejoró':v>0?'Empeoró':'Sin cambio'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`) : ''}
+
+  ${mejoras.length ? seccion(`Familias que mejoraron — ${mejoras.length} con menor DIFERENCIA $ en 2026`, '#bbf7d0', '#f0fdf4', '#15803d',
+    `<table data-sort style="${S.tbl}">
+      <thead><tr>${th('Familia')}${thR('DIFERENCIA $ 2025')}${thR('DIFERENCIA $ 2026')}${thR('Mejora $')}${thR('% Mejora')}</tr></thead>
+      <tbody>${mejoras.map((d,i)=>`<tr style="background:${i%2?'#fafafa':'#fff'}">
+        ${td('<strong>'+esc(d.f)+'</strong>')}
+        ${tdR(M(d.adp25),'#dc2626')}
+        ${tdR(d.adp26>0?M(d.adp26):'Sin diferencias',d.adp26>0?'#d97706':'#16a34a')}
+        ${tdR('▼ '+M(Math.abs(d.delta)),'#16a34a',';font-weight:700')}
+        ${tdR(pct(d.delta,d.adp25)+' menos','#16a34a')}
+      </tr>`).join('')}</tbody>
+    </table>`) : ''}
+
+  ${empeora.length ? seccion(`Familias que empeoraron — ${empeora.length} con mayor DIFERENCIA $ en 2026`, '#fecdd3', '#fff1f2', '#9f1239',
+    `<table data-sort style="${S.tbl}">
+      <thead><tr>${th('Familia')}${thR('DIFERENCIA $ 2025')}${thR('DIFERENCIA $ 2026')}${thR('Aumento $')}${thR('% Aumento')}</tr></thead>
+      <tbody>${empeora.map((d,i)=>`<tr style="background:${i%2?'#fafafa':'#fff'}">
+        ${td('<strong>'+esc(d.f)+'</strong>')}
+        ${tdR(d.adp25>0?M(d.adp25):'Sin datos 2025','#dc2626')}
+        ${tdR(M(d.adp26),'#dc2626')}
+        ${tdR('▲ +'+M(d.delta),'#dc2626',';font-weight:700')}
+        ${tdR(d.adp25>0?pct(d.delta,d.adp25)+' más':'Familia nueva','#dc2626')}
+      </tr>`).join('')}</tbody>
+    </table>`) : ''}
+
+  ${repetidas.length ? seccion(`Productos con faltante en 2025 Y en 2026 — ${repetidas.length} productos`, '#fde68a', '#fffbeb', '#92400e',
+    `<p style="padding:8px 14px 4px;font-size:12px;color:#78350f;margin:0">Estos productos tuvieron DIFERENCIA $ negativa en ambos inventarios. Revisar proceso o posible pérdida sistemática.</p>
+    <table data-sort style="${S.tbl}">
+      <thead><tr>${th('Código')}${th('Descripción')}${th('Familia')}${thR('DIFERENCIA $ 2025')}${thR('DIFERENCIA $ 2026')}</tr></thead>
+      <tbody>${repetidas.map((r,i)=>`<tr style="background:${i%2?'#fafafa':'#fff'}">
+        <td style="${S.td};font-family:monospace;font-size:11px;color:#64748b">${esc(r.c)}</td>
+        <td style="${S.td}" title="${esc(r.desc)}">${trunc(r.desc,45)}</td>
+        ${td(trunc(r.fam,22))}
+        ${tdR(M(r.dp25),'#dc2626')}
+        ${tdR(M(r.dp26),'#dc2626',';font-weight:700')}
+      </tr>`).join('')}</tbody>
+    </table>`) : ''}
+</div>
+
+<!-- TABLA PRINCIPAL POR PRODUCTO -->
+<div style="margin-top:8px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <div>
+      <span style="font-size:14px;font-weight:700;color:#1e293b">Detalle por Producto</span>
+      <span style="font-size:11px;color:#94a3b8;margin-left:8px">${N(Math.min(prodRows.length,300))} de ${N(prodRows.length)} productos · ordenados por peor DIFERENCIA $ 2026</span>
+    </div>
+    <span class="sort-hint no-print">clic en encabezado para ordenar</span>
+  </div>
+  <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px">
+    <table data-sort style="${S.tbl}">
+      <thead style="position:sticky;top:0;z-index:1"><tr>
+        ${th('CÓDIGO')}${th('DESCRIPCIÓN')}${th('FAMILIA')}
+        ${thR('STOCK SISTEMA 25')}${thR('STOCK SISTEMA 26')}
+        ${thR('DIFERENCIA 25')}${thR('DIFERENCIA 26')}
+        ${thR('DIFERENCIA $ 25')}${thR('DIFERENCIA $ 26')}
+        ${thR('VARIACION $')}
+      </tr></thead>
+      <tbody>${prodTbodyRows}</tbody>
+    </table>
+  </div>
+  ${prodRows.length>300?`<p style="font-size:11px;color:#94a3b8;margin:6px 0 0">Mostrando los primeros 300 productos. Para exportar todos usa el botón Excel en la app.</p>`:''}
+</div>
+
+<!-- PIE -->
+<div style="margin-top:32px;padding-top:12px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+  <span style="font-size:11px;color:#94a3b8">App Inventario El Manzano · Ferretería Oviedo</span>
+  <span style="font-size:11px;color:#94a3b8">${fecha}</span>
+</div>
+
+</div></body></html>`;
+
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement('a'), { href:url, download:`Reporte_Comparativo_${today()}.html` });
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    showToast('Reporte comparativo descargado — ábrelo en el navegador para ver o pegar en correo.', 'ok');
+    return;
+  }
+
+  // ── Modos 2025 / 2026 ───────────────────────────────────────────
   const kpiHtml      = document.getElementById(`kpi-${mode}`)?.innerHTML || '';
   const monetaryHtml = document.getElementById(`kpi-monetary-${mode}`)?.innerHTML || '';
   const insightHtml  = document.getElementById(`insights-${mode}`)?.innerHTML || '';
 
-  // Incluir: Top diferencias, Pérdidas unid, Sobrantes unid, Pérdidas $, Sobrantes $
   const TABLE_IDS_POR_MODE = {
     '2025': [
       ['Top 20 · Mayor diferencia absoluta (Unidades)',    `top-unid-2025`],
@@ -2694,18 +3205,15 @@ function generateReport(mode) {
       ['Top 20 · Mayores Faltantes en $ (Peso)',          `top-perdida-peso-2026`],
       ['Top 20 · Mayores Sobrantes en $ (Peso)',          `top-sobrante-peso-2026`],
     ],
-    comparative: [['Tabla Comparativa 2025 vs 2026', 'table-comparative']],
   };
 
   let tablesHtml = '';
-  const tableList = TABLE_IDS_POR_MODE[mode] || [];
-  for (const [title, id] of tableList) {
+  for (const [title, id] of TABLE_IDS_POR_MODE[mode] || []) {
     const el = document.getElementById(id);
     if (el && el.rows.length > 1) {
       tablesHtml += `<h3 style="margin:20px 0 8px;font-size:14px">${title}</h3>${el.outerHTML}`;
     }
   }
-  // Fallback para otros modos sin tabla específica
   if (!tablesHtml) {
     const view = document.getElementById(`view-${mode}`);
     if (view) {
@@ -2776,7 +3284,7 @@ ${tablesHtml}
 // ── GESTIÓN DE VISTAS ──────────────────────────────────────────
 function showWelcome() {
   document.getElementById('welcome-screen').style.display = '';
-  ['2025','2026','comparative'].forEach(m =>
+  ['2025','2026','comparative','checklist','planos','2025v2','reconteo','mejoras','final'].forEach(m =>
     document.getElementById(`view-${m}`)?.classList.add('hidden'));
 }
 
@@ -2811,6 +3319,11 @@ function refreshView() {
   } else if (mode === '2026') {
     if (has26) renderMode('2026');
     else showToast('Carga datos de 2026 primero.', 'info');
+  } else if (mode === 'final') {
+    document.getElementById('view-final')?.classList.remove('hidden');
+    renderAnalisisFinal();
+  } else if (mode === 'reconteo' || mode === 'mejoras' || mode === '2025v2') {
+    document.getElementById(`view-${mode}`)?.classList.remove('hidden');
   } else {
     renderModeComp();
   }
@@ -2920,24 +3433,22 @@ function generateReporteFinal(mode) {
   const year = state.data2026?.length ? '2026' : '2025';
   const k = calcKPIs(data);
   const m = calcMonetarySummary(data);
-  let falt = 0, sobr = 0, faltV = 0, sobrV = 0;
-  for (const r of data) {
-    if (r.dif_unidades < 0) { falt++; faltV += Math.abs(r.dif_peso || 0); }
-    else if (r.dif_unidades > 0) { sobr++; sobrV += Math.abs(r.dif_peso || 0); }
-  }
-  // Helper local: formato porcentaje chileno con signo, base monetaria (NO redefinir fmtPct global)
-  const _pct = (val, decimals) => {
+  // Clasificación por dif_peso (consistente con renderAnalisisFinal y con el Excel oficial)
+  const falt = data.filter(r => (r.dif_peso || 0) < 0).length;
+  const sobr = data.filter(r => (r.dif_peso || 0) > 0).length;
+  const faltV = Math.abs(m.difNeg);
+  const sobrV = m.difPos;
+  // Helper local: formato porcentaje chileno con signo, entero (igual al informe correo)
+  const _pct = (val) => {
     if (!isFinite(val)) return '—';
-    return (val >= 0 ? '+' : '') + val.toFixed(decimals === undefined ? 2 : decimals).replace('.', ',') + '%';
+    const r = Math.round(val);
+    return (r >= 0 ? '+' : '') + r + '%';
   };
   const _pctBase = m.totalSistema || 1;
   const pctDif   = m.totalSistema > 0 ? m.difTotal   / _pctBase * 100 : null;
   const pctDifP  = m.totalSistema > 0 ? m.difPos      / _pctBase * 100 : null;
   const pctDifN  = m.totalSistema > 0 ? m.difNeg      / _pctBase * 100 : null;
   const pctDisp  = m.totalSistema > 0 ? m.dispersion  / _pctBase * 100 : null;
-  // Estos se usan solo en el texto sub de cards (base unidades — conservar para no romper)
-  const pctFalt = k.us > 0 ? (Math.abs(data.reduce((s,r)=>s+(r.dif_unidades<0?r.dif_unidades:0),0))/k.us*100).toFixed(2) : '0.00';
-  const pctSobr = k.us > 0 ? (data.reduce((s,r)=>s+(r.dif_unidades>0?r.dif_unidades:0),0)/k.us*100).toFixed(2) : '0.00';
 
   // Agrupar por hiperfamilia para gráficos
   const byHiper = aggregateBy(data, 'perfamilia').sort((a,b)=>b.adp-a.adp);
@@ -3083,7 +3594,7 @@ tfoot td{font-weight:700;background:#dbeafe;padding:5px 8px;border-top:2px solid
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Dispersión Total</div>
-      <div class="kpi-value">${pctDisp !== null ? pctDisp.toFixed(2).replace('.',',') + '%' : '—'}</div>
+      <div class="kpi-value">${pctDisp !== null ? Math.round(pctDisp) + '%' : '—'}</div>
       <div class="kpi-sub">$ ${Math.round(m.dispersion).toLocaleString('es-CL')}</div>
     </div>
   </div>
@@ -3331,10 +3842,16 @@ rfRenderGraficos(RF_DATA);
 </body>
 </html>`;
 
-  const win = window.open('', '_blank');
-  if (!win) { showToast('El navegador bloqueó la ventana emergente. Permite ventanas emergentes para esta app.', 'error'); return; }
-  win.document.write(html);
-  win.document.close();
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), {
+    href: url,
+    download: `Reporte_Final_Inventario_${year}_${today()}.html`
+  });
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  showToast('Reporte descargado — ábrelo en el navegador para imprimir o pegar en correo.', 'ok');
 }
 
 // ── PRINT MODE ─────────────────────────────────────────────────
@@ -4148,9 +4665,10 @@ function renderV2Especiales(data) {
    ANÁLISIS FINAL — informe para el dueño
    ═══════════════════════════════════════════════════════════════ */
 function renderAnalisisFinal() {
-  const data = (state.data2026?.length ? state.data2026 : state.data2025) || [];
   const year = state.data2026?.length ? '2026' : '2025';
+  const data = getFilteredDataFinal();
   const emptyEl = document.getElementById('final-empty');
+  renderFilters('final');
 
   if (!data.length) {
     if (emptyEl) emptyEl.style.display = '';
@@ -4161,18 +4679,18 @@ function renderAnalisisFinal() {
 
   const k = calcKPIs(data);
   const m = calcMonetarySummary(data);
-  let falt = 0, sobr = 0, faltV = 0, sobrV = 0;
-  for (const r of data) {
-    if (r.dif_unidades < 0) { falt++; faltV += Math.abs(r.dif_peso || 0); }
-    else if (r.dif_unidades > 0) { sobr++; sobrV += Math.abs(r.dif_peso || 0); }
-  }
+  // Clasificación por dif_peso (sign $) — consistente con Excel y calcMonetarySummary
+  const falt = data.filter(r => (r.dif_peso || 0) < 0).length;
+  const sobr = data.filter(r => (r.dif_peso || 0) > 0).length;
+  const faltV = Math.abs(m.difNeg);
+  const sobrV = m.difPos;
 
   // ── Cuadro RESULTADOS ──────────────────────────────────────────
   const resEl = document.getElementById('final-resultados');
   if (resEl) {
-    const pctDisp = m.totalSistema > 0 ? (m.dispersion / m.totalSistema * 100).toFixed(2) : '0.00';
-    const pctFalt = k.us > 0 ? (Math.abs(data.reduce((s,r)=>s+(r.dif_unidades<0?r.dif_unidades:0),0))/k.us*100).toFixed(2) : '0.00';
-    const pctSobr = k.us > 0 ? (data.reduce((s,r)=>s+(r.dif_unidades>0?r.dif_unidades:0),0)/k.us*100).toFixed(2) : '0.00';
+    const pctDisp = m.totalSistema > 0 ? Math.round(m.dispersion / m.totalSistema * 100) : 0;
+    const pctSobr = m.totalSistema > 0 ? Math.round(sobrV / m.totalSistema * 100) : 0;
+    const pctFalt = m.totalSistema > 0 ? Math.round(faltV / m.totalSistema * 100) : 0;
     resEl.innerHTML = `
       <div class="section-card">
         <div class="section-card-header">
@@ -4184,9 +4702,9 @@ function renderAnalisisFinal() {
             <tr><td><strong>Total Sistema</strong></td><td class="num">${fmt(k.us)}</td><td class="num">${fmtMoney(k.ps)}</td><td class="num">—</td></tr>
             <tr><td><strong>Total Conteo</strong></td><td class="num">${fmt(k.ur)}</td><td class="num">${fmtMoney(k.pr)}</td><td class="num">—</td></tr>
             <tr><td><strong>Diferencias</strong></td><td class="num">${k.du>=0?'+':''}${fmt(k.du)}</td><td class="num">${fmtMoney(m.difTotal)}</td><td class="num">—</td></tr>
-            <tr style="color:var(--green)"><td><strong>Diferencias (+) sobrantes</strong></td><td class="num">${fmt(sobr)} prods</td><td class="num">${fmtMoney(sobrV)}</td><td class="num">${pctSobr}%</td></tr>
-            <tr style="color:var(--red)"><td><strong>Diferencias (−) faltantes</strong></td><td class="num">${fmt(falt)} prods</td><td class="num">${fmtMoney(faltV)}</td><td class="num">${pctFalt}%</td></tr>
-            <tr style="font-weight:700"><td><strong>Dispersion</strong></td><td class="num">${fmt(k.adu)} unid</td><td class="num">${fmtMoney(m.dispersion)}</td><td class="num">${pctDisp}%</td></tr>
+            <tr style="color:var(--green);font-weight:700;font-size:1.05em"><td><strong>Diferencias (+) sobrantes</strong></td><td class="num">${fmt(sobr)} prods</td><td class="num">${fmtMoney(sobrV)}</td><td class="num">${pctSobr}%</td></tr>
+            <tr style="color:var(--red);font-weight:700;font-size:1.05em"><td><strong>Diferencias (−) faltantes</strong></td><td class="num">${fmt(falt)} prods</td><td class="num">${fmtMoney(faltV)}</td><td class="num">${pctFalt}%</td></tr>
+            <tr style="font-weight:700"><td><strong>Dispersión</strong></td><td class="num">${fmt(k.adu)} unid</td><td class="num">${fmtMoney(m.dispersion)}</td><td class="num">${pctDisp}%</td></tr>
           </tbody>
         </table>
       </div>`;
@@ -4195,28 +4713,53 @@ function renderAnalisisFinal() {
   // ── Top sobrantes y faltantes ──────────────────────────────────
   const topsEl = document.getElementById('final-tops-grid');
   if (topsEl) {
+    topsEl.style.cssText = 'display:flex;flex-direction:column;gap:24px;';
     const topFalt = [...data].filter(r=>r.dif_peso<0).sort((a,b)=>a.dif_peso-b.dif_peso).slice(0,15);
     const topSobr = [...data].filter(r=>r.dif_peso>0).sort((a,b)=>b.dif_peso-a.dif_peso).slice(0,15);
+    const thTop = 'background:#1e40af;color:#fff;font-weight:700;white-space:nowrap';
     const mkRows = (arr, colorStyle) => arr.map(r => `
       <tr>
-        <td class="mono-sm">${r.codigo||'—'}</td>
-        <td>${trunc(r.producto||'—',35)}</td>
-        <td class="num" style="color:${colorStyle}">${r.dif_unidades>=0?'+':''}${fmt(r.dif_unidades)}</td>
-        <td class="num" style="color:${colorStyle}">${fmtMoney(r.dif_peso)}</td>
+        <td class="mono-sm" style="white-space:nowrap">${r.codigo||'—'}</td>
+        <td style="min-width:200px">${trunc(r.producto||'—',52)}</td>
+        <td class="num" style="color:#1e40af;white-space:nowrap">${fmt(r.unidades_sistema)}</td>
+        <td class="num" style="color:#1e40af;white-space:nowrap">${fmt(r.unidades_real)}</td>
+        <td class="num" style="color:${colorStyle};font-weight:700;white-space:nowrap">${r.dif_unidades>=0?'+':''}${fmt(r.dif_unidades)}</td>
+        <td class="num" style="color:${colorStyle};font-weight:700;white-space:nowrap">${fmtMoney(r.dif_peso)}</td>
+        <td style="font-size:0.78rem;color:#64748b">${trunc(r.familia||'—',24)}</td>
       </tr>`).join('');
     topsEl.innerHTML = `
-      <div class="chart-card">
-        <h4 style="color:var(--red)">Top 15 Faltantes (mayor impacto $)</h4>
-        <div class="table-scroll" style="max-height:320px">
-          <table class="data-table"><thead><tr><th>Código</th><th>Producto</th><th class="num">DIFERENCIA</th><th class="num">DIFERENCIA $</th></tr></thead>
-          <tbody>${mkRows(topFalt,'var(--red)')}</tbody></table>
+      <div class="chart-card" style="overflow:auto">
+        <h4 style="color:#dc2626;font-weight:700;font-size:1rem;margin-bottom:10px;text-transform:uppercase">TOP 15 FALTANTES (MAYOR IMPACTO $)</h4>
+        <div class="table-scroll">
+          <table class="data-table" style="min-width:700px;width:100%">
+            <thead><tr>
+              <th style="${thTop}">CÓDIGO</th>
+              <th style="${thTop}">PRODUCTO</th>
+              <th class="num" style="${thTop}">STOCK SIS.</th>
+              <th class="num" style="${thTop}">CONTEO</th>
+              <th class="num" style="${thTop}">DIF. UNID.</th>
+              <th class="num" style="${thTop}">DIFERENCIA $</th>
+              <th style="${thTop}">FAMILIA</th>
+            </tr></thead>
+            <tbody>${mkRows(topFalt,'#dc2626')}</tbody>
+          </table>
         </div>
       </div>
-      <div class="chart-card">
-        <h4 style="color:var(--green)">Top 15 Sobrantes (mayor impacto $)</h4>
-        <div class="table-scroll" style="max-height:320px">
-          <table class="data-table"><thead><tr><th>Código</th><th>Producto</th><th class="num">DIFERENCIA</th><th class="num">DIFERENCIA $</th></tr></thead>
-          <tbody>${mkRows(topSobr,'var(--green)')}</tbody></table>
+      <div class="chart-card" style="overflow:auto">
+        <h4 style="color:#16a34a;font-weight:700;font-size:1rem;margin-bottom:10px;text-transform:uppercase">TOP 15 SOBRANTES (MAYOR IMPACTO $)</h4>
+        <div class="table-scroll">
+          <table class="data-table" style="min-width:700px;width:100%">
+            <thead><tr>
+              <th style="${thTop}">CÓDIGO</th>
+              <th style="${thTop}">PRODUCTO</th>
+              <th class="num" style="${thTop}">STOCK SIS.</th>
+              <th class="num" style="${thTop}">CONTEO</th>
+              <th class="num" style="${thTop}">DIF. UNID.</th>
+              <th class="num" style="${thTop}">DIFERENCIA $</th>
+              <th style="${thTop}">FAMILIA</th>
+            </tr></thead>
+            <tbody>${mkRows(topSobr,'#1e40af')}</tbody>
+          </table>
         </div>
       </div>`;
   }
@@ -4231,7 +4774,7 @@ function renderAnalisisFinal() {
   const faltantes = [...data].filter(r=>r.dif_unidades<0 || r.dif_peso<0)
     .sort((a,b)=>(a.dif_peso||0)-(b.dif_peso||0));
   buildTable('final-faltantes-tbl',
-    ['Codigo_tecnico','Descripcion','CONTEO','STOCK SISTEMA','DIFERENCIA','DIFERENCIA $','FAMILIA','MARCA'],
+    ['CODIGO_TECNICO','DESCRIPCION','CONTEO','STOCK SISTEMA','DIFERENCIA','DIFERENCIA $','FAMILIA','HIPERFAMILIA','MARCA'],
     faltantes.slice(0,200).map(r=>[
       r.codigo||'', trunc(r.producto||'',40),
       cNum(r.unidades_real), cNum(r.unidades_sistema),
@@ -4315,7 +4858,7 @@ function _renderFinalBarras(canvasId, data) {
 }
 
 function exportFinalExcel() {
-  const data = (state.data2026?.length ? state.data2026 : state.data2025) || [];
+  const data = getFilteredDataFinal();
   const year = state.data2026?.length ? '2026' : '2025';
   if (!data.length) { showToast('Sin datos para exportar.', 'error'); return; }
 
@@ -4440,6 +4983,7 @@ document.addEventListener('DOMContentLoaded', () => {
       switchToMode('final');
       document.getElementById('welcome-screen').style.display = 'none';
       renderAnalisisFinal();
+      updateFilterBadge('final');
     };
   });
 });
@@ -5346,9 +5890,10 @@ function clearSavedSession() {
     state.data2025 = [];
     state.data2026 = [];
     state.filters  = {
-      '2025':      { marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'', bodega:'' },
-      '2026':      { marca:'', familia:'', perfamilia:'', zona:'', area:'', patente:'', bodega:'' },
-      comparative: { marca:'', familia:'', perfamilia:'', zona:'', area:'' },
+      '2025':      { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'', patente:'', bodega:'' },
+      '2026':      { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'', patente:'', bodega:'' },
+      comparative: { marca:'', familia:'', perfamilia:'', subfamilia:'', zona:'', area:'' },
+      final:       { marca:'', familia:'', perfamilia:'', subfamilia:'' },
     };
     state.drilldown = { '2025':{ hiperfamilia:'', familia:'', marca:'' }, '2026':{ hiperfamilia:'', familia:'', marca:'' } };
     state.ddState   = { '2025':{ groupBy:'familia', filterField:null, filterValue:null }, '2026':{ groupBy:'familia', filterField:null, filterValue:null } };
@@ -5380,9 +5925,14 @@ async function restoreSession() {
   if (rows25?.length) { state.data2025 = rows25; document.getElementById('status-2025').textContent = `${rows25.length} filas (guardado)`; document.getElementById('status-2025').className = 'upload-status ok'; }
   if (rows26?.length) { state.data2026 = rows26; document.getElementById('status-2026').textContent = `${rows26.length} filas (guardado)`; document.getElementById('status-2026').className = 'upload-status ok'; }
 
-  // Restaurar estado
-  if (snap.filters)       Object.assign(state.filters,       snap.filters);
-  if (snap.searchText)    Object.assign(state.searchText,    snap.searchText);
+  // Restaurar estado (merge shallow; garantizar claves nuevas que el snapshot antiguo no tenga)
+  if (snap.filters)    Object.assign(state.filters, snap.filters);
+  if (!state.filters.final)                                      state.filters.final = { marca:'', familia:'', perfamilia:'', subfamilia:'' };
+  if (!('subfamilia' in (state.filters.comparative || {})))      state.filters.comparative = Object.assign({ subfamilia:'' }, state.filters.comparative);
+  if (!('subfamilia' in (state.filters['2025'] || {})))          state.filters['2025'].subfamilia = '';
+  if (!('subfamilia' in (state.filters['2026'] || {})))          state.filters['2026'].subfamilia = '';
+  if (snap.searchText) Object.assign(state.searchText, snap.searchText);
+  if (!state.searchText.final) state.searchText.final = '';
   if (snap.chartMode)     Object.assign(state.chartMode,     snap.chartMode);
   if (snap.drilldown)     Object.assign(state.drilldown,     snap.drilldown);
   if (snap.ddState)       Object.assign(state.ddState,       snap.ddState);

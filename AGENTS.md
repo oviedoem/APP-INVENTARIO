@@ -25,28 +25,96 @@ Al correr `generar_planos.js` y actualizar las 4 funciones `_planoHtml_X()` en `
 
 ---
 
-## REGLA ANTI-RETROCESO — OBLIGATORIA EN CADA SESIÓN
+## REGLA ANTI-RETROCESO — OBLIGATORIA EN CADA SESIÓN (mejorada V7.22)
 
-Antes de tocar una función, anotar explícitamente qué ya FUNCIONA y NO debe cambiar.
+### PASO 0 — Declarar antes de editar (siempre)
+```
+TOCO:     [nombre exacto de la función]
+ARCHIVO:  [app.js | index.html | style.css]
+RAZÓN:    [una línea — qué cambia y por qué]
+NO TOCO:  [funciones adyacentes que NO se tocan]
+```
 
-**Funcionalidades V4.1→V4.5 protegidas — NUNCA eliminar:**
-- Color print (V4.3): `* { -webkit-print-color-adjust: exact !important }` en @media print
-- Excel profesional (V4.3): `exportTableToExcel` con estilos, bordes, formatos
-- Email Final sin auto-print (V4.4): rama 'final' de `emailReport` sin `printMode` bloqueante
-- Reconteo prioridad/clic (V4.3): `_recountPriority`, `recountFiltrarPorFila`
-- Persistencia (V4.0): `saveDataToIDB`, `loadDataFromIDB`, `restoreSession`
-- Planos merges (V4.4): `renderPlanoGrid` con `spanMap`/`skipSet`
-- Planos cobertura verde/rojo (V4.1): `getPlanoContados`, colores en `patenteStyle`
+### PASO 1 — Checklists según tipo de cambio
 
-**Señal de alerta:** Si un cambio necesita tocar más de una función → dos prompts separados.
+**Si agregas una clave a `state.*` (p.ej. `state.filters.final`):**
+```
+□ Grep: state.filters = {   → actualizar TODOS los literales de inicialización
+□ clearSavedSession()        → incluir la nueva clave en el reset
+□ loadStateFromLS()          → agregar guardia post-merge para compatibilidad con snapshots viejos
+□ clearFilters(mode)         → incluir la nueva clave en el reset por modo
+□ updateFilterBadge(mode)    → verificar que lee la nueva clave correctamente
+□ Nueva función que LA LEE   → usar || {} o || '' (nunca acceso directo sin guard)
+```
+
+**Si agregas un nuevo modo/vista (p.ej. mode='final'):**
+```
+□ refreshView()              → agregar rama explícita else if (mode === 'final')
+□ clearFilters(mode)         → verificar que el reset incluye el modo
+□ renderFilters(mode)        → agregar los grupos de filtro para ese modo
+□ closeFilterPanel(mode)     → ya usa ?. así que es seguro, pero verificar
+□ index.html                 → agregar filter-drawer-{mode}, filter-overlay-{mode}, filter-badge-{mode}
+□ DOMContentLoaded           → revisar si el tab-btn del modo nuevo necesita handler propio
+```
+
+**Si modificas una función de render que usa datos filtrados:**
+```
+□ Verificar que usa getFilteredData*() y NO state.data2026 directo
+□ Si hay botón de exportar en esa vista → también actualizar la función export*()
+□ Si hay función de reporte en esa vista → también actualizar generateReport*()
+```
+
+**Si modificas `isBlankLike()` o `cleanText()`:**
+```
+□ Estas funciones afectan TODO el pipeline de lectura de Excel
+□ Buscar usos: rowValueByAliases, applyRowMapping, buildFamiliaIndex, buildMissingDataIndex
+□ Verificar que valores legítimos no queden capturados como "blank"
+```
+
+### PASO 2 — Invariantes que NUNCA deben romperse
+```
+state.filters[mode]      siempre existe para '2025', '2026', 'comparative', 'final'
+                         siempre tiene: marca, familia, perfamilia, subfamilia
+state.searchText[mode]   siempre existe para '2025', '2026', 'comparative', 'final'
+state.drilldown[year]    siempre existe para '2025' y '2026'
+state.compDrill          siempre tiene: { field, value }
+refreshView()            maneja explícitamente TODOS los modos: 2025, 2026, final, comparative,
+                         reconteo, mejoras, 2025v2, checklist, planos
+loadStateFromLS()        después del Object.assign, garantizar TODAS las claves nuevas con guards
+```
+
+### PASO 3 — Pre-commit checklist (antes de cada git commit)
+```
+□ node --check app.js                    → sin errores de sintaxis
+□ Bump cache-bust en index.html          → app.js?v=X.XX+1
+□ ¿Se tocó state.filters?               → verificar clearSavedSession + loadStateFromLS
+□ ¿Se agregó modo nuevo?                → verificar refreshView() tiene rama para él
+□ ¿Se cambió renderAnalisisFinal()?     → verificar que refreshView lo llama
+□ ¿Se cambió getFilteredData*()?        → verificar guard || {} en todas las funciones que la llaman
+□ Abrir browser, recargar, ir a cada tab afectado → sin errores en consola
+```
+
+### PASO 4 — Funcionalidades protegidas (NUNCA eliminar)
+- Color print: `* { -webkit-print-color-adjust: exact !important }` en @media print
+- Excel profesional: `exportTableToExcel` con estilos, bordes, formatos
+- Email Final sin auto-print: rama 'final' de `emailReport` sin `printMode` bloqueante
+- Reconteo prioridad/clic: `_recountPriority`, `recountFiltrarPorFila`
+- Persistencia: `saveDataToIDB`, `loadDataFromIDB`, `restoreSession`
+- Planos merges: `renderPlanoGrid` con `spanMap`/`skipSet`
+- Planos cobertura: `getPlanoContados`, colores en `patenteStyle`
+- Lookup familia: `buildFamiliaIndex` guarda clave exacta + normalizeSku + numStr
+- Guard localStorage: `loadStateFromLS` garantiza `filters.final`, `searchText.final`,
+  `filters.comparative.subfamilia` después del Object.assign
+
+**Señal de alerta:** Un cambio que necesita tocar más de 2 funciones → analizar impacto completo ANTES de editar la primera.
 
 ---
 
 ## REGLA DE CIERRE DE SESIÓN — PUSH PENDIENTE
 
-Antes de terminar cualquier sesión donde se hayan modificado archivos en `D:\APP-INVENTARIO\`, Claude DEBE:
+Antes de terminar cualquier sesión donde se hayan modificado archivos en `E:\APP-INVENTARIO\`, Claude DEBE:
 
-1. Ejecutar `git status` en `D:\APP-INVENTARIO\`
+1. Ejecutar `git status` en `E:\APP-INVENTARIO\`
 2. Si hay archivos modificados o sin commitear → hacer `git add -A && git commit && git push`
 3. Verificar que GitHub Pages se republica (el workflow se dispara automáticamente en cada push)
 4. Nunca dejar `app.js`, `index.html`, `style.css` o `planos_generated.js` modificados sin publicar
@@ -55,7 +123,7 @@ Patrón de riesgo: se edita el código, se prueba localmente, la sesión termina
 
 Comando rápido:
 ```
-cd D:\APP-INVENTARIO && git add -A && git status
+cd E:\APP-INVENTARIO && git add -A && git status
 ```
 Si hay cambios → commitear con mensaje descriptivo y hacer push.
 
@@ -64,9 +132,9 @@ Si hay cambios → commitear con mensaje descriptivo y hacer push.
 ## PROYECTO INDEPENDIENTE — REGLA ABSOLUTA
 
 ```
-TRABAJAR SOLO EN:   D:\APP-INVENTARIO\
-NUNCA TOCAR:        Cualquier archivo fuera de D:\APP-INVENTARIO\
-                    En particular D:\ferreteria-oviedo\ es OTRO proyecto (panel-admin,
+TRABAJAR SOLO EN:   E:\APP-INVENTARIO\
+NUNCA TOCAR:        Cualquier archivo fuera de E:\APP-INVENTARIO\
+                    En particular E:\ferreteria-oviedo\ es OTRO proyecto (panel-admin,
                     panel-cliente, panel-vendedor, pipeline ERP). No mezclar.
 
 REPO GITHUB:        https://github.com/oviedoem/APP-INVENTARIO  (público)
@@ -89,7 +157,7 @@ no leer archivos fuera de esta carpeta.
 ## ARCHIVOS DEL PROYECTO
 
 ```
-D:\APP-INVENTARIO\
+E:\APP-INVENTARIO\
   index.html            — estructura HTML + vistas
   style.css             — estilos (CSS variables + componentes)
   app.js                — lógica completa (state, parseo, render, filtros)
@@ -125,22 +193,37 @@ NO TOCO:  [funciones adyacentes que NO se van a modificar]
 
 | Si tocas... | Verifica también... |
 |---|---|
-| `getFilteredData(year)` | Que siga combinando `state.drilldown` + `state.filters` |
-| `renderFilters(mode)` | Que modos year solo muestren zona/área/patente/bodega |
-| `clearFilters(mode)` | Que llame `closeFilterPanel` + `updateFilterBadge` al final |
+| `state.filters` (agregar clave) | `clearSavedSession`, `loadStateFromLS` (guard post-merge), `clearFilters`, `updateFilterBadge` |
+| `refreshView()` | Que tenga rama explícita para TODOS los modos: 2025, 2026, final, comparative, reconteo, mejoras, 2025v2 |
+| `getFilteredData(year)` | Que siga combinando `state.drilldown` + `state.filters` + `searchText` |
+| `getFilteredDataFinal()` | Que use `state.filters.final \|\| {}` (guard) |
+| `renderAnalisisFinal()` | Que use `getFilteredDataFinal()` (no `state.data2026` directo), que llame `renderFilters('final')` |
+| `renderFilters(mode)` | Que modos year/final tengan marca/familia/hiperfamilia/subfamilia + ubicación |
+| `clearFilters(mode)` | Que incluya `subfamilia:''`, `final:{}` en el reset, que llame `closeFilterPanel` + `updateFilterBadge` |
 | `renderEmbudo(year)` | Que no pise los filtros del drawer |
 | `toggleAcc(btn)` | Que `initAccordions()` siga conectando `.acc-btn` al DOMContentLoaded |
 | `renderModeComp()` | Que `setCompCategoria()` la llame (no `renderCompCategoria` directo) |
-| Cualquier `render*()` | Que los IDs de elementos coincidan con los del HTML |
+| `buildFamiliaIndex()` | Que guarde clave exacta + normalizeSku + numStr por cada código |
+| `isBlankLike()` | Que 'Sin clasificar' siga en la lista; verificar que no capture valores legítimos |
+| Cualquier `render*()` | Que los IDs de elementos coincidan exactamente con los del index.html |
+| Cualquier `export*()` | Que use datos filtrados (getFiltered*) no datos crudos (state.data*) |
 
 ### 4. No romper estos invariantes
 
 ```
-- state.drilldown[year]  siempre existe para '2025' y '2026'
-- state.filters[mode]    siempre tiene las claves: zona, area, patente, bodega, marca, familia, perfamilia
-- state.compDrill        siempre tiene: { field, value } (null cuando no hay drill activo)
-- initAccordions()       debe correr en DOMContentLoaded
-- updateFilterBadge(mode) debe llamarse después de cualquier cambio a filters o drilldown
+state.filters[mode]       siempre existe para: '2025', '2026', 'comparative', 'final'
+                           claves obligatorias: marca, familia, perfamilia, subfamilia
+                           + para year modes: zona, area, patente, bodega
+state.searchText[mode]    siempre existe para: '2025', '2026', 'comparative', 'final'
+state.drilldown[year]     siempre existe para '2025' y '2026'
+state.compDrill           siempre tiene: { field, value } (null cuando inactivo)
+refreshView()             DEBE tener rama para CADA modo que existe en el nav
+loadStateFromLS()         DESPUÉS del Object.assign, DEBE tener guards para:
+                             state.filters.final, state.searchText.final,
+                             state.filters.comparative.subfamilia,
+                             state.filters['2025'].subfamilia, state.filters['2026'].subfamilia
+initAccordions()          debe correr en DOMContentLoaded
+updateFilterBadge(mode)   debe llamarse después de cualquier cambio a filters o drilldown
 ```
 
 ---
@@ -155,7 +238,7 @@ Antes de terminar cualquier sesión con cambios:
 
 2. Ejecutar sync a GitHub:
    ```
-   D:\APP-INVENTARIO\ACTUALIZAR_GITHUB_APP_INVENTARIO.bat
+   E:\APP-INVENTARIO\ACTUALIZAR_GITHUB_APP_INVENTARIO.bat
    ```
 
 3. Confirmar que el commit fue exitoso (aparece hash y "subido a GitHub").
@@ -169,7 +252,7 @@ Antes de terminar cualquier sesión con cambios:
 - HTML + CSS + **Vanilla JS** — sin frameworks, sin npm, sin build step
 - Las librerías se cargan desde CDN en `index.html` (no agregar nuevas sin pedirlo)
 - No agregar dependencias externas
-- No crear archivos fuera de `D:\APP-INVENTARIO\`
+- No crear archivos fuera de `E:\APP-INVENTARIO\`
 
 ### CDN activos
 ```
@@ -182,22 +265,30 @@ Chart.js  4.4.3          — gráficos
 
 ## ARQUITECTURA RÁPIDA
 
-### Vistas HTML
+### Vistas HTML (todas deben tener rama en refreshView)
 ```
-view-2025         — análisis 2025 (embudo 30% | drilldown+charts 70%)
-view-2026         — análisis 2026 (misma estructura)
-view-comparative  — comparativo 2025 vs 2026
-view-checklist    — checklist de inventario
-view-mejoras      — sugerencias de mejora (acordeones)
-view-reconteo     — centro de reconteo operacional
-view-2025v2       — análisis avanzado 2025
+view-2025         — análisis 2025 (embudo 30% | drilldown+charts 70%)    → renderMode('2025')
+view-2026         — análisis 2026 (misma estructura)                      → renderMode('2026')
+view-comparative  — comparativo 2025 vs 2026                              → renderModeComp()
+view-final        — análisis final consolidado con filtros                → renderAnalisisFinal()
+view-checklist    — checklist de inventario                               → no refreshView (estático)
+view-mejoras      — sugerencias de mejora (acordeones)                    → no refreshView (estático)
+view-reconteo     — centro de reconteo operacional                        → solo muestra la vista
+view-2025v2       — análisis avanzado 2025                                → solo muestra la vista
+view-planos       — planos de patentes                                    → no refreshView (estático)
 ```
 
-### Sistema de filtrado (2 capas)
+### Sistema de filtrado (3 capas — V7.20+)
 ```
-Capa 1 — Embudo (state.drilldown):  hiperfamilia → familia → marca
-Capa 2 — Drawer (state.filters):    zona · área · patente · bodega
-getFilteredData(year) combina ambas en orden: drilldown → filters → searchText
+Capa 1 — Embudo (state.drilldown):           hiperfamilia → familia → marca   [solo 2025/2026]
+Capa 2 — Drawer chips (state.filters):        marca · familia · hiperfamilia · subfamilia
+                                              + zona · área · patente · bodega [solo year modes]
+Capa 3 — Búsqueda texto (state.searchText):   código o descripción [todos los modos]
+
+Funciones de datos filtrados:
+  getFilteredData(year)     → 2025 / 2026 (drilldown + filters + searchText)
+  getFilteredDataComp()     → { d25, d26 } para comparativo
+  getFilteredDataFinal()    → Análisis Final (filters.final + searchText.final)
 ```
 
 ### Acordeones
