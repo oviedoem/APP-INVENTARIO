@@ -78,3 +78,8 @@ Si desaparece → `ReferenceError` → todos los tabs del nav quedan sin handler
 Node.js:  E:\nodejs-portable\node.exe
 Git:      E:\git-portable\mingw64\bin\git.exe
 ```
+
+---
+
+## Registro de corridas (16-10-2026)
+- `ACTUALIZAR_GITHUB_APP_INVENTARIO.bat` enganchado al registro de corridas del Centro de Control (encabezado de 7 lineas, proyecto `appinventario`); queda en el calendario con su log. El .bat paso a fin de linea CRLF (obligatorio: con solo LF los goto/etiquetas fallan). Respaldo: E:\_ARCHIVO_FERRETERIA\appinventario-bat-respaldo-20261016. Sin commit ni push hechos.
