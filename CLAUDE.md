@@ -83,3 +83,9 @@ Git:      E:\git-portable\mingw64\bin\git.exe
 
 ## Registro de corridas (16-10-2026)
 - `ACTUALIZAR_GITHUB_APP_INVENTARIO.bat` enganchado al registro de corridas del Centro de Control (encabezado de 7 lineas, proyecto `appinventario`); queda en el calendario con su log. El .bat paso a fin de linea CRLF (obligatorio: con solo LF los goto/etiquetas fallan). Respaldo: E:\_ARCHIVO_FERRETERIA\appinventario-bat-respaldo-20261016. Sin commit ni push hechos.
+
+## Auditoría Codex 2026-11-04
+- Log de referencia: `E:\CONOCIMIENTO DEL NEGOCIO\control-center\registro\logs\appinventario\2026-10-16_181836_ok.log`; repo estaba limpio antes de esta documentación.
+- Inventario: 23 archivos; orden segura con 0 movimientos y manifiesto en `historico\2026-11-04-orden\MANIFIESTO.md`.
+- `node_modules` y `planos_generated.js` son dependencias/artefacto vigentes; no se tocaron. No se ejecutó `generar_planos.js` ni el bat de publicación.
+- Documentación y copia saneada de Drive preparadas el 04-11. No se hizo git, deploy ni GitHub Pages.
