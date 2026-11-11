@@ -89,3 +89,7 @@ Git:      E:\git-portable\mingw64\bin\git.exe
 - Inventario: 23 archivos; orden segura con 0 movimientos y manifiesto en `historico\2026-11-04-orden\MANIFIESTO.md`.
 - `node_modules` y `planos_generated.js` son dependencias/artefacto vigentes; no se tocaron. No se ejecutó `generar_planos.js` ni el bat de publicación.
 - Documentación y copia saneada de Drive preparadas el 04-11. No se hizo git, deploy ni GitHub Pages.
+
+## Corrección del lanzador (11-11-2026)
+- `ACTUALIZAR_GITHUB_APP_INVENTARIO.bat`: "sin cambios" ya NO es aviso. Se detecta con `git diff --cached --quiet`; sin cambios igual hace `pull --rebase` y `push` (por si hay commits sin subir) y termina en `[OK] ... al dia en GitHub`, exit 0, estado `ok` en el registro. Un `git commit` que falla de verdad ahora es `[ERROR]` con exit 1 (antes se confundía con "sin cambios" y salía como aviso). Probado el 11-11 con árbol limpio: `[OK]`, `EXIT=0`, repo en `527ba76`. Respaldo del original: `E:\_ARCHIVO_FERRETERIA\appinventario-bat-respaldo-20261111\`.
+- Este proyecto no tiene pipeline de datos: la app es una SPA sin backend y el `.bat` es solo commit + push a GitHub Pages. Que dure 0 s es normal. Lo publicado en Pages = HEAD de git (verificado por hash el 11-11).
